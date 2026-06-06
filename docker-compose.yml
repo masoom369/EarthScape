@@ -1,28 +1,33 @@
 services:
   hadoop-namenode:
-    image: apache/hadoop:3.3.6
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
     hostname: hadoop-namenode
-    command: ["hdfs", "namenode"]
+    container_name: earthscape-namenode
     ports:
       - "9870:9870"
       - "8020:8020"
-      - "8088:8088"
     volumes:
       - hadoop_namenode_data:/hadoop/dfs/name
     environment:
       CLUSTER_NAME: earthscape
+      CORE_CONF_fs_defaultFS: hdfs://hadoop-namenode:8020
+      CORE_CONF_hadoop_http_staticuser_user: root
+      HDFS_CONF_dfs_replication: "1"
+      HDFS_CONF_dfs_namenode_name_dir: file:///hadoop/dfs/name
+      HDFS_CONF_dfs_permissions_enabled: "false"
     networks:
       - hadoop-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9870"]
+      test: ["CMD", "curl", "-sf", "http://localhost:9870/dfshealth.html"]
       interval: 30s
-      retries: 5
-      start_period: 60s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
 
   hadoop-datanode:
-    image: apache/hadoop:3.3.6
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
     hostname: hadoop-datanode
-    command: ["hdfs", "datanode"]
+    container_name: earthscape-datanode
     depends_on:
       hadoop-namenode:
         condition: service_healthy
@@ -32,13 +37,51 @@ services:
       - hadoop_datanode_data:/hadoop/dfs/data
     environment:
       SERVICE_PRECONDITION: "hadoop-namenode:9870"
+      CORE_CONF_fs_defaultFS: hdfs://hadoop-namenode:8020
+      HDFS_CONF_dfs_replication: "1"
+      HDFS_CONF_dfs_datanode_data_dir: file:///hadoop/dfs/data
+      HDFS_CONF_dfs_permissions_enabled: "false"
     networks:
       - hadoop-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9864"]
+      test: ["CMD", "curl", "-sf", "http://localhost:9864/datanode.html"]
       interval: 30s
-      retries: 5
-      start_period: 60s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+
+  hadoop-resourcemanager:
+    image: bde2020/hadoop-resourcemanager:2.0.0-hadoop3.2.1-java8
+    hostname: hadoop-resourcemanager
+    container_name: earthscape-resourcemanager
+    depends_on:
+      hadoop-namenode:
+        condition: service_healthy
+    ports:
+      - "8088:8088"
+    environment:
+      SERVICE_PRECONDITION: "hadoop-namenode:9870 hadoop-datanode:9864"
+      CORE_CONF_fs_defaultFS: hdfs://hadoop-namenode:8020
+      YARN_CONF_yarn_log___aggregation___enable: "true"
+      YARN_CONF_yarn_resourcemanager_recovery_enabled: "true"
+      YARN_CONF_yarn_resourcemanager_store_class: org.apache.hadoop.yarn.server.resourcemanager.recovery.FileSystemRMStateStore
+      YARN_CONF_yarn_resourcemanager_fs_state___store_uri: /rmstate
+      YARN_CONF_yarn_nodemanager_remote___app___log___dir: /app-logs
+    networks:
+      - hadoop-net
+
+  hadoop-nodemanager:
+    image: bde2020/hadoop-nodemanager:2.0.0-hadoop3.2.1-java8
+    hostname: hadoop-nodemanager
+    container_name: earthscape-nodemanager
+    depends_on:
+      hadoop-resourcemanager:
+        condition: service_started
+    environment:
+      SERVICE_PRECONDITION: "hadoop-namenode:9870 hadoop-datanode:9864 hadoop-resourcemanager:8088"
+      CORE_CONF_fs_defaultFS: hdfs://hadoop-namenode:8020
+    networks:
+      - hadoop-net
 
 volumes:
   hadoop_namenode_data:
