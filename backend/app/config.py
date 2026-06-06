@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
     alert_cache_ttl_seconds: int = 60
     realtime_producer_interval: int = 10
-    default_admin_email: str = "admin@earthscape.local"
+    default_admin_email: str = "admin@earthscape.com"
     default_admin_password: str = "Admin123!"
     archive_threshold_days: int = 365
     mapreduce_default_fill: float = -9999.0

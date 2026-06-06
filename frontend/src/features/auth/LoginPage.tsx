@@ -6,7 +6,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { theme } from '../../styles/theme';
 
 export function LoginPage() {
-  const [email, setEmail] = useState('admin@earthscape.local');
+  const [email, setEmail] = useState('admin@earthscape.com');
   const [password, setPassword] = useState('Admin123!');
   const [error, setError] = useState('');
   const { login } = useAuth();

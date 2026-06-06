@@ -46,7 +46,7 @@ pip install -e .
 uvicorn app.main:app --reload --port 8000
 ```
 
-Default admin: `admin@earthscape.local` / `Admin123!`
+Default admin: `admin@earthscape.com` / `Admin123!`
 
 ### 4. Seed Data
 
