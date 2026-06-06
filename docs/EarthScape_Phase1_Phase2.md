@@ -29,7 +29,7 @@
 | Constraint | Detail |
 |---|---|
 | Frontend | React 19+, TypeScript, Vite — runs natively on host |
-| Backend | Python 3.13+, FastAPI — runs natively on host |
+| Backend | Python 3.11+, FastAPI — runs natively on host |
 | Primary Database | MongoDB 7 — installed and running natively on host (not containerized) |
 | Big Data Layer | Hadoop 3.x (HDFS + MapReduce via Hadoop Streaming) — runs inside Docker Desktop only |
 | Containerization | Docker Desktop used exclusively for the Hadoop cluster (NameNode + DataNode) |
@@ -277,7 +277,7 @@ HOST MACHINE
 │                                                                              │
 │  ┌─────────────────┐   HTTP/REST    ┌───────────────────────────────────┐   │
 │  │   React SPA     │ ─────────────▶ │         FastAPI Backend           │   │
-│  │   (Vite)        │               │         (Python 3.13)             │   │
+│  │   (Vite)        │               │         (Python 3.11)             │   │
 │  │   Port: 5173    │ ◀───────────── │                                   │   │
 │  └─────────────────┘               │  Auth │ Ingest │ Jobs │ ML │ Alerts│   │
 │                                    └──────────────┬────────────────────┘   │
@@ -326,7 +326,7 @@ HOST MACHINE
 | Component | Runtime | Host / Port | Purpose |
 |---|---|---|---|
 | React Frontend | Native (Node 22, Vite) | `localhost:5173` | SPA served by Vite dev server |
-| FastAPI Backend | Native (Python 3.13) | `localhost:8000` | REST API, job runner, ML engine |
+| FastAPI Backend | Native (Python 3.11) | `localhost:8000` | REST API, job runner, ML engine |
 | MongoDB | Native (MongoDB 7) | `localhost:27017` | Primary operational database |
 | Hadoop NameNode | Docker Desktop | `localhost:9870`, `localhost:8020`, `localhost:8088` | HDFS metadata, YARN resource management |
 | Hadoop DataNode | Docker Desktop | `localhost:9864` | HDFS block storage, job execution |

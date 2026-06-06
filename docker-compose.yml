@@ -1,0 +1,49 @@
+services:
+  hadoop-namenode:
+    image: apache/hadoop:3.3.6
+    hostname: hadoop-namenode
+    command: ["hdfs", "namenode"]
+    ports:
+      - "9870:9870"
+      - "8020:8020"
+      - "8088:8088"
+    volumes:
+      - hadoop_namenode_data:/hadoop/dfs/name
+    environment:
+      CLUSTER_NAME: earthscape
+    networks:
+      - hadoop-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9870"]
+      interval: 30s
+      retries: 5
+      start_period: 60s
+
+  hadoop-datanode:
+    image: apache/hadoop:3.3.6
+    hostname: hadoop-datanode
+    command: ["hdfs", "datanode"]
+    depends_on:
+      hadoop-namenode:
+        condition: service_healthy
+    ports:
+      - "9864:9864"
+    volumes:
+      - hadoop_datanode_data:/hadoop/dfs/data
+    environment:
+      SERVICE_PRECONDITION: "hadoop-namenode:9870"
+    networks:
+      - hadoop-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9864"]
+      interval: 30s
+      retries: 5
+      start_period: 60s
+
+volumes:
+  hadoop_namenode_data:
+  hadoop_datanode_data:
+
+networks:
+  hadoop-net:
+    driver: bridge

@@ -107,7 +107,7 @@ Stack floors:
 - React: 19+, hooks only, RSC-first, Vite or Next.js app/
 - Vue: 3.5+, Composition API only, script setup, Pinia, Vite
 - Angular: 18+, signals, standalone components, inject()
-- Python: 3.13+, match/case, native unions, pyproject.toml, pydantic v2
+- Python: 3.11+, match/case, native unions, pyproject.toml, pydantic v2
 - Go: 1.23+, context everywhere, errors.Is/As, slog
 - Rust: 2021 edition, thiserror/anyhow, tokio, no unwrap() in lib
 - PHP: 8.3+, typed props, enums, fibers, Composer, no global state
