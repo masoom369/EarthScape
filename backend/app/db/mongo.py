@@ -29,7 +29,7 @@ def get_db() -> AsyncIOMotorDatabase:
 
 
 async def create_indexes() -> None:
-    """Create all collection indexes programmatically on startup."""
+    """Create all collection indexes on startup. Idempotent — safe to call every boot."""
     db = get_db()
 
     await db.users.create_index("email", unique=True)

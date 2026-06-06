@@ -14,9 +14,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/login", response_model=UserProfile)
 async def login(body: LoginRequest, response: Response):
-    service = AuthService()
     try:
-        profile, token, _, _ = await service.login(body.email, body.password)
+        profile, token, _, _ = await AuthService().login(body.email, body.password)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
     settings = get_settings()
@@ -37,7 +36,6 @@ async def logout(
     user: dict = Depends(get_current_user),
     access_token: Annotated[str | None, Cookie(alias=COOKIE_NAME)] = None,
 ):
-    service = AuthService()
     settings = get_settings()
     if access_token:
         try:
@@ -45,7 +43,7 @@ async def logout(
             jti = payload.get("jti")
             exp = payload.get("exp")
             if jti and exp:
-                await service.logout(jti, datetime.fromtimestamp(exp, tz=UTC))
+                await AuthService().logout(jti, datetime.fromtimestamp(exp, tz=UTC))
         except Exception:
             pass
     response.delete_cookie(COOKIE_NAME, path="/")

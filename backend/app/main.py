@@ -8,7 +8,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from app.config import get_settings
-from app.db.mongo import connect, create_indexes, disconnect, get_db
+from app.db.mongo import connect, create_indexes, disconnect
 from app.middleware.logging import RequestLoggingMiddleware
 from app.routes import alerts, auth, climate, ingest, jobs, support, system, users
 from app.routes.ingest import limiter
@@ -30,8 +30,7 @@ async def lifespan(app: FastAPI):
     try:
         await connect()
         await create_indexes()
-        auth = AuthService()
-        await auth.ensure_default_admin(
+        await AuthService().ensure_default_admin(
             settings.default_admin_email,
             settings.default_admin_password,
         )
@@ -43,6 +42,8 @@ async def lifespan(app: FastAPI):
     await disconnect()
 
 
+settings = get_settings()
+
 app = FastAPI(
     title="EarthScape Climate Agency API",
     version="1.0.0",
@@ -51,7 +52,7 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-settings = get_settings()
+# Middleware — order matters: CORS first, then logging, then rate-limit
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
@@ -66,20 +67,18 @@ app.add_middleware(SlowAPIMiddleware)
 
 
 @app.exception_handler(RuntimeError)
-async def mongo_error_handler(request: Request, exc: RuntimeError):
+async def runtime_error_handler(request: Request, exc: RuntimeError):
     if "MongoDB not connected" in str(exc):
         return JSONResponse(status_code=503, content={"detail": "Database unavailable"})
     raise exc
 
 
-api = FastAPI()
-api.include_router(auth.router)
-api.include_router(users.router)
-api.include_router(ingest.router)
-api.include_router(jobs.router)
-api.include_router(climate.router)
-api.include_router(alerts.router)
-api.include_router(support.router)
-api.include_router(system.router)
-
-app.mount("/api/v1", api)
+# All routers on the single app — no sub-app mount, ensures middleware applies everywhere
+app.include_router(auth.router, prefix="/api")
+app.include_router(users.router, prefix="/api")
+app.include_router(ingest.router, prefix="/api")
+app.include_router(jobs.router, prefix="/api")
+app.include_router(climate.router, prefix="/api")
+app.include_router(alerts.router, prefix="/api")
+app.include_router(support.router, prefix="/api")
+app.include_router(system.router)

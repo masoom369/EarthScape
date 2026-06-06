@@ -9,8 +9,9 @@ def train_correlation_model(records: list[dict]) -> dict[str, Any]:
     """
     Compute Pearson correlation matrix for temperature, CO2, precipitation, humidity.
 
-    Input: climate_records with metric fields.
-    Output: correlation_matrix 4x4 object keyed by metric name.
+    Input:  climate_record dicts with optional metric fields.
+    Output: correlation_matrix 4x4 keyed by metric name; predictions is always empty
+            for this model type.
     """
     metrics = ["temperature_c", "co2_ppm", "precipitation_mm", "humidity_pct"]
     rows = []
@@ -25,8 +26,10 @@ def train_correlation_model(records: list[dict]) -> dict[str, Any]:
     df = pd.DataFrame(rows).dropna(how="all")
     corr = df.corr(method="pearson", min_periods=3)
     matrix = {
-        m1: {m2: round(float(corr.loc[m1, m2]), 4) if pd.notna(corr.loc[m1, m2]) else None
-             for m2 in metrics}
+        m1: {
+            m2: round(float(corr.loc[m1, m2]), 4) if pd.notna(corr.loc[m1, m2]) else None
+            for m2 in metrics
+        }
         for m1 in metrics
     }
 

@@ -22,7 +22,10 @@ async def trigger_mapreduce(
 ):
     service = JobService()
     job_id = await service.job_repo.create(
-        "mapreduce", body.job_name, user["id"], body.hdfs_input_path,
+        "mapreduce",
+        body.job_name,
+        user["id"],
+        body.hdfs_input_path,
         f"/earthscape/processed/mapreduce/{body.job_type}/pending",
     )
     background_tasks.add_task(
@@ -33,7 +36,13 @@ async def trigger_mapreduce(
         user["id"],
         str(job_id),
     )
-    return await service.job_repo.find_by_id(str(job_id))
+    result = await service.job_repo.find_by_id(str(job_id))
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Job record missing after creation",
+        )
+    return result
 
 
 @router.post("/ml/train", status_code=status.HTTP_202_ACCEPTED)

@@ -7,7 +7,7 @@ from app.repositories.alert_repo import AlertRepository
 
 class AlertService:
     _cache: list[dict] | None = None
-    _cache_time: float = 0
+    _cache_time: float = 0.0
 
     def __init__(self):
         self.repo = AlertRepository(get_db())
@@ -15,11 +15,13 @@ class AlertService:
 
     @classmethod
     def invalidate_cache(cls) -> None:
+        """Force reload on next get_active_rules call. Called on any rule mutation."""
         cls._cache = None
-        cls._cache_time = 0
+        cls._cache_time = 0.0
 
     async def get_active_rules(self) -> list[dict]:
-        now = time.time()
+        """Return active rules from cache; refresh if stale or invalidated."""
+        now = time.monotonic()
         if (
             AlertService._cache is not None
             and now - AlertService._cache_time < self.settings.alert_cache_ttl_seconds

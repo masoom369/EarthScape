@@ -1,56 +1,61 @@
-"""Seed climate data via the ingestion API."""
+#!/usr/bin/env python3
+"""
+Seed MongoDB and HDFS from a local file.
+Usage: python scripts/seed.py --file seed_data/weather_stations_2023.csv
+Requires backend .env present and MongoDB + HDFS running.
+"""
 
 import argparse
 import asyncio
 import sys
 from pathlib import Path
 
-import httpx
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-API_BASE = "http://localhost:8000/api/v1"
-DEFAULT_EMAIL = "admin@earthscape.local"
-DEFAULT_PASSWORD = "Admin123!"
+from app.config import get_settings
+from app.db.mongo import connect, create_indexes, disconnect
+from app.services.auth_service import AuthService
+from app.services.ingestion_service import IngestionService
 
 
-async def seed_file(filepath: Path, email: str, password: str) -> None:
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        login = await client.post(
-            f"{API_BASE}/auth/login",
-            json={"email": email, "password": password},
+async def seed(filepath: str) -> None:
+    await connect()
+    await create_indexes()
+    settings = get_settings()
+    await AuthService().ensure_default_admin(
+        settings.default_admin_email, settings.default_admin_password
+    )
+
+    from app.repositories.user_repo import UserRepository
+    from app.db.mongo import get_db
+    admin = await UserRepository(get_db()).find_by_email(settings.default_admin_email)
+    if not admin:
+        print("ERROR: admin user not found")
+        return
+
+    path = Path(filepath)
+    content = path.read_bytes()
+    service = IngestionService()
+    try:
+        result = await service.ingest_file(
+            path.name,
+            content,
+            "text/csv" if path.suffix == ".csv" else "application/json",
+            str(admin["_id"]),
         )
-        if login.status_code != 200:
-            print(f"Login failed: {login.text}")
-            sys.exit(1)
+        print(f"Seeded {result['record_count']} records from {path.name}")
+    except ValueError as exc:
+        print(f"Skipped {path.name}: {exc}")
+    finally:
+        await disconnect()
 
-        content = filepath.read_bytes()
-        ext = filepath.suffix.lower()
-        mime = {
-            ".csv": "text/csv",
-            ".json": "application/json",
-            ".geojson": "application/geo+json",
-        }.get(ext, "application/octet-stream")
 
-        source_type = None
-        if "weather" in filepath.name:
-            source_type = "weather_station"
-        elif "sensor" in filepath.name:
-            source_type = "sensor"
-        elif "satellite" in filepath.name:
-            source_type = "satellite"
-
-        files = {"file": (filepath.name, content, mime)}
-        data = {}
-        if source_type:
-            data["source_type"] = source_type
-
-        resp = await client.post(f"{API_BASE}/ingest/upload", files=files, data=data)
-        print(f"Seed {filepath.name}: {resp.status_code} — {resp.text}")
+def main() -> None:
+    parser = argparse.ArgumentParser(description="EarthScape seed loader")
+    parser.add_argument("--file", required=True, help="Path to seed file")
+    args = parser.parse_args()
+    asyncio.run(seed(args.file))
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--file", required=True, type=Path)
-    parser.add_argument("--email", default=DEFAULT_EMAIL)
-    parser.add_argument("--password", default=DEFAULT_PASSWORD)
-    args = parser.parse_args()
-    asyncio.run(seed_file(args.file, args.email, args.password))
+    main()

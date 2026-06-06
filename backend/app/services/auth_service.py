@@ -1,9 +1,5 @@
 from app.db.mongo import get_db
-from app.middleware.auth import (
-    create_access_token,
-    hash_password,
-    verify_password,
-)
+from app.middleware.auth import create_access_token, hash_password, verify_password
 from app.repositories.token_repo import TokenRepository
 from app.repositories.user_repo import UserRepository
 
@@ -35,6 +31,7 @@ class AuthService:
         await self.token_repo.revoke(jti, expires_at)
 
     async def ensure_default_admin(self, email: str, password: str) -> None:
+        """Create admin account only when the users collection is empty."""
         count = await self.user_repo.count_all()
         if count == 0:
             await self.user_repo.create(email, hash_password(password), "admin")

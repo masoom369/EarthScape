@@ -7,20 +7,20 @@ THRESHOLD = 2.5
 METRICS = ["temperature_c", "humidity_pct", "co2_ppm"]
 DEFAULT_FILL = -9999
 
-current_region = None
-records = []
+current_region: str | None = None
+records: list[dict] = []
 
 
-def emit_results(region, recs):
+def emit_results(region: str, recs: list[dict]) -> None:
     if not recs:
         return
-    stats = {}
+    stats: dict[str, tuple[float, float]] = {}
     for m in METRICS:
         vals = [r.get(m) for r in recs if r.get(m) is not None]
         if vals:
             mean = sum(vals) / len(vals)
             variance = sum((v - mean) ** 2 for v in vals) / len(vals)
-            stats[m] = (mean, math.sqrt(variance) if variance > 0 else 0)
+            stats[m] = (mean, math.sqrt(variance) if variance > 0 else 0.0)
     for rec in recs:
         scores = []
         for m in METRICS:
@@ -28,17 +28,15 @@ def emit_results(region, recs):
             if val is None or m not in stats:
                 continue
             mean, std = stats[m]
-            z = (val - mean) / std if std > 0 else 0
+            z = (val - mean) / std if std > 0 else 0.0
             scores.append(abs(z))
-        max_z = max(scores) if scores else 0
-        is_anomaly = max_z > THRESHOLD
-        out = {
+        max_z = max(scores) if scores else 0.0
+        print(json.dumps({
             "record_id": rec.get("record_id", ""),
             "anomaly_score": round(max_z, 4),
-            "is_anomaly": is_anomaly,
+            "is_anomaly": max_z > THRESHOLD,
             "filled": any(rec.get(m) is None for m in METRICS),
-        }
-        print(json.dumps(out))
+        }))
 
 
 for line in sys.stdin:

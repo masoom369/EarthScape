@@ -1,9 +1,4 @@
-from typing import Literal
-
 from pydantic import BaseModel
-
-IngestionStatus = Literal["pending", "success", "failed"]
-IngestionFormat = Literal["csv", "json", "geojson"]
 
 
 class IngestionLogResponse(BaseModel):

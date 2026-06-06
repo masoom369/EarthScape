@@ -33,8 +33,7 @@ async def update_user(
     body: UserUpdate,
     _user: dict = Depends(require_roles("admin")),
 ):
-    updates = body.model_dump(exclude_none=True)
-    result = await UserService().update_user(user_id, updates)
+    result = await UserService().update_user(user_id, body.model_dump(exclude_none=True))
     if not result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     return result

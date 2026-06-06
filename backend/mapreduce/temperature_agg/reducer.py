@@ -2,7 +2,7 @@
 import sys
 
 current_region = None
-temps = []
+temps: list[float] = []
 
 for line in sys.stdin:
     region, temp = line.strip().split("\t", 1)

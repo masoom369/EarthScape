@@ -1,10 +1,13 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import (
+    APIRouter, BackgroundTasks, Depends, File, Form,
+    HTTPException, Query, UploadFile, status,
+)
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from starlette.requests import Request
 
 from app.jobs.alert_worker import evaluate_record_alerts
-from app.middleware.auth import get_current_user, require_roles
+from app.middleware.auth import require_roles
 from app.models.ingestion import IngestionLogResponse, PaginatedIngestionLogs
 from app.services.ingestion_service import IngestionService
 
@@ -22,9 +25,8 @@ async def upload_file(
     user: dict = Depends(require_roles("admin", "analyst")),
 ):
     content = await file.read()
-    service = IngestionService()
     try:
-        result = await service.ingest_file(
+        result = await IngestionService().ingest_file(
             file.filename or "upload",
             content,
             file.content_type or "",
@@ -34,11 +36,14 @@ async def upload_file(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except RuntimeError as exc:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
 
-    for rec in result.get("records", []):
+    # Fire alert evaluation for sensor records only, with correct MongoDB-assigned IDs
+    for rec, inserted_id in result.get("records_with_ids", []):
         if rec.get("source_type") == "sensor":
-            background_tasks.add_task(evaluate_record_alerts, rec)
+            background_tasks.add_task(evaluate_record_alerts, rec, inserted_id)
 
     return {
         "id": result["id"],

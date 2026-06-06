@@ -27,7 +27,7 @@ class SupportService:
 
     async def update_ticket(self, ticket_id: str, updates: dict, admin_id: str) -> dict | None:
         patch = dict(updates)
-        if "response" in patch and patch["response"]:
+        if patch.get("response"):
             patch["responded_by"] = admin_id
             patch["responded_at"] = datetime.now(UTC)
         return await self.repo.update(ticket_id, patch)

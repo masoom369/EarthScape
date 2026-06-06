@@ -35,8 +35,7 @@ class YARNClient:
         for _ in range(max_attempts):
             data = await self.get_application(app_id)
             app = data.get("app", {})
-            state = app.get("state", "")
-            if state in ("FINISHED", "FAILED", "KILLED"):
+            if app.get("state", "") in ("FINISHED", "FAILED", "KILLED"):
                 return app
             await asyncio.sleep(interval)
         return {"state": "TIMEOUT", "finalStatus": "FAILED", "diagnostics": "Polling timeout"}

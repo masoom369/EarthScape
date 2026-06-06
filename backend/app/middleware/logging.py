@@ -4,6 +4,8 @@ import structlog
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
+from app.metrics import increment_request_count
+
 logger = structlog.get_logger()
 
 
@@ -12,6 +14,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         start = time.perf_counter()
         response = await call_next(request)
         duration_ms = (time.perf_counter() - start) * 1000
+        increment_request_count()
         logger.info(
             "request",
             method=request.method,

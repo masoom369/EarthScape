@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -54,11 +54,12 @@ class ClimateRepository:
             f["is_anomaly"] = is_anomaly
         return f
 
-    async def bulk_insert(self, records: list[dict]) -> int:
+    async def bulk_insert(self, records: list[dict]) -> tuple[int, list[str]]:
+        """Insert records, return (count, list of inserted id strings)."""
         if not records:
-            return 0
+            return 0, []
         result = await self.collection.insert_many(records)
-        return len(result.inserted_ids)
+        return len(result.inserted_ids), [str(oid) for oid in result.inserted_ids]
 
     async def count_filtered(self, **kwargs) -> int:
         return await self.collection.count_documents(self._build_filter(**kwargs))
@@ -90,6 +91,7 @@ class ClimateRepository:
         return [_serialize(d) async for d in cursor]
 
     async def bulk_update_anomaly_flags(self, record_ids: list[str]) -> int:
+        """Back-write is_anomaly: true on records flagged by ML model."""
         oids = [ObjectId(rid) for rid in record_ids if ObjectId.is_valid(rid)]
         if not oids:
             return 0
@@ -100,7 +102,8 @@ class ClimateRepository:
         return result.modified_count
 
     async def find_for_ml(self, days: int, fields: list[str] | None = None) -> list[dict]:
-        since = datetime.now(UTC) - __import__("datetime").timedelta(days=days)
+        """Fetch records from last N days for ML training."""
+        since = datetime.now(UTC) - timedelta(days=days)
         cursor = self.collection.find(
             {"timestamp": {"$gte": since}, "is_archived": False}
         ).sort("timestamp", 1)
@@ -141,7 +144,9 @@ class ClimateRepository:
                 "$group": {
                     "_id": {
                         "region": "$location.region",
-                        "period": {"$dateToString": {"format": "%Y-%m", "date": "$timestamp"}},
+                        "period": {
+                            "$dateToString": {"format": "%Y-%m", "date": "$timestamp"}
+                        },
                     },
                     "avg_temperature_c": {"$avg": "$temperature_c"},
                     "total_precipitation_mm": {"$sum": "$precipitation_mm"},

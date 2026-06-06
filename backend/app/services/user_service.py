@@ -13,8 +13,7 @@ class UserService:
         return {"items": items, "total": total, "page": page, "limit": limit}
 
     async def create_user(self, email: str, password: str, role: str) -> dict:
-        existing = await self.repo.find_by_email(email)
-        if existing:
+        if await self.repo.find_by_email(email):
             raise ValueError("Email already registered")
         return await self.repo.create(email, hash_password(password), role)
 

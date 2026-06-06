@@ -43,8 +43,7 @@ async def delete_rule(
     rule_id: str,
     _user: dict = Depends(require_roles("admin")),
 ):
-    deleted = await AlertService().delete_rule(rule_id)
-    if not deleted:
+    if not await AlertService().delete_rule(rule_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found")
 
 

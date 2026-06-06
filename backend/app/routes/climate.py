@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import PlainTextResponse
 
 from app.middleware.auth import get_current_user, require_roles
@@ -41,8 +41,7 @@ async def climate_realtime(
     n: int = Query(100, ge=1, le=500),
     _user: dict = Depends(get_current_user),
 ):
-    items = await ClimateService().get_realtime(n)
-    return {"items": items}
+    return {"items": await ClimateService().get_realtime(n)}
 
 
 @router.get("/export")
@@ -57,9 +56,12 @@ async def export_climate(
 ):
     try:
         csv_data = await ClimateService().export_csv(
-            region=region, source_type=source_type,
-            from_date=from_date, to_date=to_date,
-            is_anomaly=is_anomaly, is_archived=is_archived,
+            region=region,
+            source_type=source_type,
+            from_date=from_date,
+            to_date=to_date,
+            is_anomaly=is_anomaly,
+            is_archived=is_archived,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
