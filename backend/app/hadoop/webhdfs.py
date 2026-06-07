@@ -1,5 +1,6 @@
 import asyncio
 from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 
@@ -9,6 +10,16 @@ from app.config import get_settings
 class WebHDFSClient:
     def __init__(self):
         self.settings = get_settings()
+
+    def _rewrite_datanode_url(self, url: str) -> str:
+        """
+        WebHDFS redirects to the DataNode's self-reported hostname.
+        Inside Docker that hostname is 'host.docker.internal' or the container name —
+        neither resolves reliably from a Windows host process.
+        Rewrite to localhost since all DataNode ports are exposed on localhost.
+        """
+        parsed = urlparse(url)
+        return urlunparse(parsed._replace(netloc=f"localhost:{parsed.port}"))
 
     async def _request(
         self,
@@ -40,7 +51,7 @@ class WebHDFSClient:
         return resp.status_code in (200, 201)
 
     async def upload_file(self, hdfs_path: str, data: bytes, overwrite: bool = True) -> bool:
-        """Two-step WebHDFS CREATE: get redirect URL, then PUT data to DataNode."""
+        """Two-step WebHDFS CREATE: get redirect URL, rewrite host, PUT data to DataNode."""
         params = {"op": "CREATE", "overwrite": str(overwrite).lower()}
         create_resp = await self._request("PUT", hdfs_path, params)
         if create_resp.status_code not in (307, 201):
@@ -48,20 +59,23 @@ class WebHDFSClient:
         redirect_url = create_resp.headers.get("Location")
         if not redirect_url:
             return False
+        # Rewrite DataNode hostname → localhost so Windows host process can reach it
+        local_url = self._rewrite_datanode_url(redirect_url)
         async with httpx.AsyncClient(timeout=60.0) as client:
-            put_resp = await client.put(redirect_url, content=data)
+            put_resp = await client.put(local_url, content=data)
             return put_resp.status_code == 201
 
     async def read_file(self, hdfs_path: str) -> str:
-        """WebHDFS OPEN always redirects 307 to DataNode. Raise on any other status."""
+        """WebHDFS OPEN redirects 307 to DataNode. Rewrite host before following."""
         resp = await self._request("GET", hdfs_path, {"op": "OPEN"})
         if resp.status_code != 307:
             raise RuntimeError(
                 f"WebHDFS OPEN failed for {hdfs_path}: "
                 f"HTTP {resp.status_code} — {resp.text[:200]}"
             )
+        local_url = self._rewrite_datanode_url(resp.headers["Location"])
         async with httpx.AsyncClient(timeout=60.0) as client:
-            redirect = await client.get(resp.headers["Location"])
+            redirect = await client.get(local_url)
             redirect.raise_for_status()
             return redirect.text
 

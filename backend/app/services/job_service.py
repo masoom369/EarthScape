@@ -5,7 +5,6 @@ from bson import ObjectId
 
 from app.db.mongo import get_db
 from app.hadoop.webhdfs import WebHDFSClient
-from app.hadoop.yarn import YARNClient
 from app.jobs.mapreduce_runner import MapReduceRunner
 from app.repositories.job_repo import JobRepository
 from app.repositories.ml_repo import MLRepository
@@ -17,7 +16,6 @@ class JobService:
         self.job_repo = JobRepository(db)
         self.ml_repo = MLRepository(db)
         self.hdfs = WebHDFSClient()
-        self.yarn = YARNClient()
         self.runner = MapReduceRunner()
 
     async def trigger_mapreduce(
@@ -33,31 +31,28 @@ class JobService:
 
         try:
             await self.job_repo.update_status(job_id, "running")
+            start = datetime.now(UTC)
+
             app_id, output_path = await self.runner.submit_job(
                 job_id_str, job_type, job_name, hdfs_input
             )
-            start = datetime.now(UTC)
-            app = await self.yarn.poll_until_finished(app_id)
+
+            # Local runner completes synchronously — no YARN polling needed.
+            # YARN polling only applies when app_id is a real YARN application id.
             duration = int((datetime.now(UTC) - start).total_seconds())
 
-            if app.get("finalStatus") != "SUCCEEDED":
-                error = app.get("diagnostics", "Job failed")
-                await self.job_repo.update_status(
-                    job_id, "failed", error=error, duration_seconds=duration
-                )
-            else:
-                summary = await self._read_and_parse_output(output_path, job_type)
-                await self.ml_repo.create({
-                    "model_type": f"mapreduce_{job_type}",
-                    "record_count": len(summary),
-                    "predictions": summary,
-                    "job_id": job_id,
-                })
-                await self.job_repo.update_status(
-                    job_id, "completed",
-                    duration_seconds=duration,
-                    hdfs_output=output_path,
-                )
+            summary = await self._read_and_parse_output(output_path, job_type)
+            await self.ml_repo.create({
+                "model_type": f"mapreduce_{job_type}",
+                "record_count": len(summary),
+                "predictions": summary,
+                "job_id": job_id,
+            })
+            await self.job_repo.update_status(
+                job_id, "completed",
+                duration_seconds=duration,
+                hdfs_output=output_path,
+            )
         except Exception as exc:
             await self.job_repo.update_status(job_id, "failed", error=str(exc))
 

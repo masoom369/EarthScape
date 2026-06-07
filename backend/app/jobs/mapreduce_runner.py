@@ -1,9 +1,16 @@
+import asyncio
+import io
+import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
+import structlog
+
 from app.config import get_settings
 from app.hadoop.webhdfs import WebHDFSClient
-from app.hadoop.yarn import YARNClient
+
+logger = structlog.get_logger()
 
 MAPREDUCE_DIR = Path(__file__).parent.parent.parent / "mapreduce"
 
@@ -11,87 +18,81 @@ MAPREDUCE_DIR = Path(__file__).parent.parent.parent / "mapreduce"
 class MapReduceRunner:
     def __init__(self):
         self.hdfs = WebHDFSClient()
-        self.yarn = YARNClient()
         self.settings = get_settings()
 
-    async def _upload_scripts(self, job_type: str) -> None:
-        """Upload mapper and reducer to HDFS before job submission."""
+    def _run_pipeline(self, job_type: str, input_data: str) -> str:
+        """
+        Execute mapper | sort | reducer as a local subprocess pipeline.
+        Mirrors exactly what Hadoop Streaming does — mapper emits key\tvalue,
+        sort groups by key, reducer aggregates. Pure Python, no YARN dependency.
+        """
         script_dir = MAPREDUCE_DIR / job_type
-        hdfs_dir = f"/earthscape/scripts/{job_type}"
-        await self.hdfs.mkdir(hdfs_dir)
-        for script in ("mapper.py", "reducer.py"):
-            content = (script_dir / script).read_bytes()
-            await self.hdfs.upload_file(f"{hdfs_dir}/{script}", content, overwrite=True)
+        mapper = str(script_dir / "mapper.py")
+        reducer = str(script_dir / "reducer.py")
 
-    async def _resource_entry(self, hdfs_path: str) -> dict[str, Any]:
-        """Fetch HDFS file metadata for YARN local-resource descriptor."""
-        status = await self.hdfs.get_file_status(hdfs_path)
-        if not status:
-            raise RuntimeError(f"Cannot get HDFS status for {hdfs_path}")
-        return {
-            "resource": (
-                f"hdfs://{self.settings.hdfs_namenode_host}:8020{hdfs_path}"
-            ),
-            "type": "FILE",
-            "visibility": "APPLICATION",
-            "size": status["length"],
-            "timestamp": status["modificationTime"],
-        }
+        # mapper
+        map_proc = subprocess.run(
+            ["python", mapper],
+            input=input_data,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if map_proc.returncode != 0:
+            raise RuntimeError(f"Mapper failed: {map_proc.stderr[:500]}")
+
+        # sort (simulate Hadoop shuffle/sort by key)
+        sorted_lines = sorted(map_proc.stdout.splitlines())
+        sorted_input = "\n".join(sorted_lines)
+
+        # reducer
+        red_proc = subprocess.run(
+            ["python", reducer],
+            input=sorted_input,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if red_proc.returncode != 0:
+            raise RuntimeError(f"Reducer failed: {red_proc.stderr[:500]}")
+
+        return red_proc.stdout
 
     async def submit_job(
         self, job_id: str, job_type: str, job_name: str, hdfs_input_path: str
     ) -> tuple[str, str]:
         """
-        Upload scripts, build YARN payload, submit Streaming job.
-        Returns (yarn_application_id, hdfs_output_path).
+        Read input from HDFS, run local mapper|sort|reducer pipeline,
+        write output back to HDFS. Returns (pseudo_app_id, hdfs_output_path).
         """
-        await self._upload_scripts(job_type)
-
         output_path = f"/earthscape/processed/mapreduce/{job_type}/{job_id}"
-        streaming_jar = self.settings.hadoop_streaming_jar
 
-        new_app = await self.yarn.new_application()
-        app_id: str = new_app["application-id"]
-
-        mapper_hdfs = f"/earthscape/scripts/{job_type}/mapper.py"
-        reducer_hdfs = f"/earthscape/scripts/{job_type}/reducer.py"
-
-        mapper_res = await self._resource_entry(mapper_hdfs)
-        reducer_res = await self._resource_entry(reducer_hdfs)
-        jar_res = await self._resource_entry(streaming_jar)
-
-        command = (
-            f"hadoop jar hadoop-streaming.jar "
-            f"-input {hdfs_input_path} "
-            f"-output {output_path} "
-            f"-mapper mapper.py "
-            f"-reducer reducer.py "
-            f"-file mapper.py "
-            f"-file reducer.py"
+        logger.info(
+            "mapreduce_local_start",
+            job_id=job_id,
+            job_type=job_type,
+            hdfs_input=hdfs_input_path,
         )
 
-        payload = {
-            "application-id": app_id,
-            "application-name": job_name,
-            "application-type": "MAPREDUCE",
-            "am-container-spec": {
-                "commands": {"command": command},
-                "local-resources": {
-                    "entry": [
-                        {"key": "mapper.py", "value": mapper_res},
-                        {"key": "reducer.py", "value": reducer_res},
-                        {
-                            "key": "hadoop-streaming.jar",
-                            "value": {**jar_res, "visibility": "PUBLIC"},
-                        },
-                    ]
-                },
-            },
-            "resource": {"memory": 1024, "vCores": 1},
-            "priority": {"priority": 1},
-            "queue": "default",
-            "unmanaged-AM": False,
-        }
+        # Read input file from HDFS
+        input_data = await self.hdfs.read_file(hdfs_input_path)
 
-        await self.yarn.submit_application(payload)
-        return app_id, output_path
+        # Run pipeline in thread pool — subprocess.run blocks
+        loop = asyncio.get_running_loop()
+        output = await loop.run_in_executor(
+            None, self._run_pipeline, job_type, input_data
+        )
+
+        # Write output back to HDFS
+        await self.hdfs.mkdir(output_path)
+        output_bytes = output.encode("utf-8")
+        await self.hdfs.upload_file(f"{output_path}/part-00000", output_bytes, overwrite=True)
+
+        logger.info(
+            "mapreduce_local_done",
+            job_id=job_id,
+            output_lines=output.count("\n"),
+        )
+
+        # Return a pseudo app_id — job_service.trigger_mapreduce uses this only for logging
+        return f"local-{job_id}", output_path

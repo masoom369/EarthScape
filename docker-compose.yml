@@ -15,6 +15,7 @@ services:
       HDFS_CONF_dfs_replication: "1"
       HDFS_CONF_dfs_namenode_name_dir: file:///hadoop/dfs/name
       HDFS_CONF_dfs_permissions_enabled: "false"
+      HDFS_CONF_dfs_namenode_datanode_registration_ip___hostname___check: "false"
     networks:
       - hadoop-net
     healthcheck:
@@ -33,6 +34,8 @@ services:
         condition: service_healthy
     ports:
       - "9864:9864"
+      - "9866:9866"
+      - "9867:9867"
     volumes:
       - hadoop_datanode_data:/hadoop/dfs/data
     environment:
@@ -41,6 +44,10 @@ services:
       HDFS_CONF_dfs_replication: "1"
       HDFS_CONF_dfs_datanode_data_dir: file:///hadoop/dfs/data
       HDFS_CONF_dfs_permissions_enabled: "false"
+      HDFS_CONF_dfs_datanode_hostname: host.docker.internal
+      HDFS_CONF_dfs_datanode_http_address: 0.0.0.0:9864
+      HDFS_CONF_dfs_datanode_address: 0.0.0.0:9866
+      HDFS_CONF_dfs_datanode_ipc_address: 0.0.0.0:9867
     networks:
       - hadoop-net
     healthcheck:
