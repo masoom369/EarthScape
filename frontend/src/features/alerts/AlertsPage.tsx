@@ -20,10 +20,10 @@ import { useAlertStore } from "@/stores/alertStore";
 import type { AlertRule, PaginatedAlertEvents } from "@/types/alert";
 
 const ruleSchema = z.object({
-  name: z.string().min(1),
+  name: z.string().min(1, "Name is required"),
   metric: z.enum(["temperature_c", "precipitation_mm", "co2_ppm", "humidity_pct"]),
   operator: z.enum([">", "<", "=", ">=", "<="]),
-  threshold: z.coerce.number(),
+  threshold: z.number(),
   severity: z.enum(["low", "medium", "high"]),
 });
 type RuleForm = z.infer<typeof ruleSchema>;
@@ -236,7 +236,18 @@ export default function AlertsPage() {
             </Select>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Threshold" type="number" step="any" error={errors.threshold?.message} {...register("threshold")} />
+            <Input
+              label="Threshold"
+              type="number"
+              step="any"
+              error={errors.threshold?.message}
+              {
+                // valueAsNumber tells RHF to read the input as a JS number,
+                // not a string — this is the correct layer to do the conversion,
+                // keeping the zod schema's type a clean z.number() with no unknown.
+                ...register("threshold", { valueAsNumber: true })
+              }
+            />
             <Select label="Severity" {...register("severity")}>
               <option value="low">Low</option>
               <option value="medium">Medium</option>

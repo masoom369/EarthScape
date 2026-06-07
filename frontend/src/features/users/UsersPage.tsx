@@ -17,21 +17,6 @@ import Pagination from "@/components/ui/Pagination";
 import { formatDate } from "@/lib/utils";
 import type { UserResponse, PaginatedUsers } from "@/types/user";
 
-interface UserResponse {
-  id: string;
-  email: string;
-  role: string;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-}
-interface PaginatedUsers {
-  items: UserResponse[];
-  total: number;
-  page: number;
-  limit: number;
-}
-
 const createSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),

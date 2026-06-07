@@ -1,7 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { Thermometer, CloudRain, Activity, Bell } from "lucide-react";
-import api from "@/lib/api";
-import { usePoll } from "@/hooks/usePoll";
+import api, { getOrNull } from "@/lib/api";
 import PageHeader from "@/components/ui/PageHeader";
 import StatCard from "@/components/ui/StatCard";
 import { Card, CardHeader, CardTitle } from "@/components/ui/Card";
@@ -26,16 +25,16 @@ export default function DashboardPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [sumRes, anomRes, trendRes, corrRes] = await Promise.allSettled([
+      const [sumRes, anomaly, trend, corr] = await Promise.all([
         api.get<ClimateSummaryResponse>("/climate/summary"),
-        api.get<MLResult>("/jobs/ml/train/latest?model_type=anomaly_detection").catch(() => null),
-        api.get<MLResult>("/jobs/ml/train/latest?model_type=trend_prediction").catch(() => null),
-        api.get<MLResult>("/jobs/ml/train/latest?model_type=correlation").catch(() => null),
+        getOrNull<MLResult>("/jobs/ml/train/latest?model_type=anomaly_detection"),
+        getOrNull<MLResult>("/jobs/ml/train/latest?model_type=trend_prediction"),
+        getOrNull<MLResult>("/jobs/ml/train/latest?model_type=correlation"),
       ]);
-      if (sumRes.status === "fulfilled") setSummary(sumRes.value.data);
-      if (anomRes.status === "fulfilled" && anomRes.value) setMlAnomaly(anomRes.value.data);
-      if (trendRes.status === "fulfilled" && trendRes.value) setMlTrend(trendRes.value.data);
-      if (corrRes.status === "fulfilled" && corrRes.value) setMlCorr(corrRes.value.data);
+      setSummary(sumRes.data);
+      setMlAnomaly(anomaly);
+      setMlTrend(trend);
+      setMlCorr(corr);
     } finally {
       setLoading(false);
     }

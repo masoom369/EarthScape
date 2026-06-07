@@ -1,5 +1,4 @@
 import { useAlertStore } from "@/stores/alertStore";
-import { useAuth } from "@/hooks/useAuth";
 import api from "@/lib/api";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
