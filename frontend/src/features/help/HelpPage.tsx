@@ -8,7 +8,7 @@ const HELP_MD = `
 ### Login and Session Management
 Sign in at the login page using your email and password. Your session is stored in a secure httpOnly cookie and expires after 60 minutes of inactivity. Click **Logout** in the top-right corner to end your session immediately.
 
-Default credentials for first run: \`admin@earthscape.local\` / \`Admin123!\`
+Default credentials for first run: \`admin@earthscape.com\` / \`Admin123!\`
 
 ---
 

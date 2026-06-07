@@ -1,10 +1,14 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from motor.motor_asyncio import AsyncIOMotorDatabase
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from starlette.requests import Request
 
-from app.middleware.auth import require_roles
+from app.db.mongo import get_db
+from app.middleware.auth import get_current_user, require_roles
 from app.models.job import JobLogResponse, MLTrainRequest, MapReduceJobRequest, PaginatedJobLogs
+from app.models.ml import MLResultResponse
+from app.repositories.ml_repo import MLRepository
 from app.services.job_service import JobService
 from app.services.ml_service import MLService
 
@@ -55,6 +59,21 @@ async def train_ml(
 ):
     background_tasks.add_task(MLService().train, body.model_type, user["id"])
     return {"message": f"ML training started for {body.model_type}"}
+
+
+@router.get("/ml/train/latest", response_model=MLResultResponse)
+async def get_latest_ml_result(
+    model_type: str = Query(..., description="Model type: anomaly_detection, trend_prediction, correlation"),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+):
+    result = await MLRepository(db).get_latest_by_type(model_type)
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No ML result for model type: {model_type}",
+        )
+    return result
 
 
 @router.get("", response_model=PaginatedJobLogs)
