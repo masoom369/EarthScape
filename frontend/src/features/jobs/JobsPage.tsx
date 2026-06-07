@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -16,12 +16,13 @@ import { Table, Thead, Th, Tbody, Tr, Td } from "@/components/ui/Table";
 import Pagination from "@/components/ui/Pagination";
 import { formatDateTime } from "@/lib/utils";
 import type { JobLog, PaginatedJobLogs } from "@/types/job";
+import type { IngestionLog, PaginatedIngestionLogs } from "@/types/ingestion";
 
 const POLL_MS = Number(import.meta.env.VITE_POLL_JOBS_MS ?? 5000);
 
 const mrSchema = z.object({
-  job_name: z.string().min(1),
-  hdfs_input_path: z.string().min(1),
+  job_name: z.string().min(1, "Required"),
+  hdfs_input_path: z.string().min(1, "Select an ingested file"),
   job_type: z.enum(["temperature_agg", "precipitation_totals", "anomaly_scores"]),
 });
 type MRForm = z.infer<typeof mrSchema>;
@@ -46,13 +47,25 @@ export default function JobsPage() {
   const [page, setPage] = useState(1);
   const [mlSubmitting, setMlSubmitting] = useState(false);
   const [mlModel, setMlModel] = useState("anomaly_detection");
+  const [ingestedFiles, setIngestedFiles] = useState<IngestionLog[]>([]);
 
   const loadJobs = useCallback(async (p = 1) => {
     try {
       const { data } = await api.get<PaginatedJobLogs>(`/jobs?page=${p}&limit=20`);
       setJobs(data.items);
       setTotal(data.total);
-    } catch { /* silent */ }
+    } catch { /* silent poll error */ }
+  }, []);
+
+  // Inline async IIFE avoids the react-hooks/set-state-in-effect false positive
+  // that fires when a useCallback setter is called directly in an effect body.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const { data } = await api.get<PaginatedIngestionLogs>("/ingest/logs?page=1&limit=100");
+        setIngestedFiles(data.items.filter((l) => l.status === "success" && l.hdfs_path));
+      } catch { /* non-critical */ }
+    })();
   }, []);
 
   usePoll(() => loadJobs(page), POLL_MS);
@@ -91,20 +104,34 @@ export default function JobsPage() {
       <PageHeader title="Jobs" description="Trigger MapReduce processing and ML model training" />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* MapReduce form */}
         <Card>
           <CardHeader>
             <CardTitle>MapReduce Job</CardTitle>
             <Cpu size={18} style={{ color: "var(--text-tertiary)" }} />
           </CardHeader>
           <form onSubmit={handleSubmit(onMR)} className="space-y-3">
-            <Input label="Job Name" error={errors.job_name?.message} {...register("job_name")} />
             <Input
-              label="HDFS Input Path"
-              placeholder="/earthscape/raw/..."
-              error={errors.hdfs_input_path?.message}
-              {...register("hdfs_input_path")}
+              label="Job Name"
+              error={errors.job_name?.message}
+              {...register("job_name")}
             />
+            <div className="space-y-1">
+              <Select
+                label="Input File (HDFS)"
+                error={errors.hdfs_input_path?.message}
+                {...register("hdfs_input_path")}
+              >
+                <option value="">— Select an ingested file —</option>
+                {ingestedFiles.length === 0 && (
+                  <option disabled>No ingested files found</option>
+                )}
+                {ingestedFiles.map((log) => (
+                  <option key={log.id} value={log.hdfs_path!}>
+                    {log.filename} · {log.record_count} records · {formatDateTime(log.created_at)}
+                  </option>
+                ))}
+              </Select>
+            </div>
             <Select label="Job Type" {...register("job_type")}>
               <option value="temperature_agg">Temperature Aggregation</option>
               <option value="precipitation_totals">Precipitation Totals</option>
@@ -116,7 +143,6 @@ export default function JobsPage() {
           </form>
         </Card>
 
-        {/* ML training form */}
         <Card>
           <CardHeader>
             <CardTitle>ML Training</CardTitle>
@@ -138,7 +164,6 @@ export default function JobsPage() {
         </Card>
       </div>
 
-      {/* Job list */}
       <Card>
         <CardHeader>
           <CardTitle>Job History</CardTitle>
