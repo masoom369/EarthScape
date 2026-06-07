@@ -1,31 +1,69 @@
-import { useAlertStore } from '../../stores/alertStore';
-import { usePoll } from '../../hooks/usePoll';
-import { theme } from '../../styles/theme';
-import { Badge } from '../../components/Badge';
-import { Button } from '../../components/Button';
+import { useAlertStore } from "@/stores/alertStore";
+import { useAuth } from "@/hooks/useAuth";
+import api from "@/lib/api";
+import Badge from "@/components/ui/Badge";
+import Button from "@/components/ui/Button";
+import EmptyState from "@/components/ui/EmptyState";
+import { Bell, CheckCheck } from "lucide-react";
+import { formatDateTime } from "@/lib/utils";
+import { toast } from "sonner";
 
-const POLL_MS = Number(import.meta.env.VITE_POLL_ALERTS_MS);
+const SEVERITY_VARIANT: Record<string, "danger" | "warning" | "info"> = {
+  high: "danger",
+  medium: "warning",
+  low: "info",
+};
 
-export function NotificationsPanel() {
-  const { events, fetchEvents, acknowledge } = useAlertStore();
-  usePoll(fetchEvents, POLL_MS);
+export default function NotificationsPanel() {
+  const events = useAlertStore((s) => s.unacknowledged);
+  const acknowledge = useAlertStore((s) => s.acknowledge);
+
+  async function ack(id: string) {
+    try {
+      await api.patch(`/alerts/events/${id}/acknowledge`);
+      acknowledge(id);
+    } catch {
+      toast.error("Failed to acknowledge");
+    }
+  }
+
+  if (!events.length) {
+    return (
+      <EmptyState
+        icon={<Bell size={20} />}
+        title="No active alerts"
+        description="All clear — no unacknowledged events"
+      />
+    );
+  }
 
   return (
-    <div style={{ background: theme.colors.surface, padding: theme.spacing.lg, borderRadius: theme.radius.lg }}>
-      <h3>Alert Notifications</h3>
-      {events.length === 0 && <p style={{ color: theme.colors.textMuted }}>No unacknowledged alerts.</p>}
-      {events.map((e) => (
-        <div key={e.id} style={{
-          padding: theme.spacing.sm, borderBottom: `1px solid ${theme.colors.border}`,
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        }}>
-          <div>
-            <Badge status={e.severity}>{e.severity}</Badge>
-            <span style={{ marginLeft: theme.spacing.sm, fontSize: theme.fontSize.sm }}>
-              Value: {e.triggered_value} — {new Date(e.triggered_at).toLocaleString()}
-            </span>
+    <div className="space-y-2 max-h-64 overflow-y-auto">
+      {events.slice(0, 20).map((e) => (
+        <div
+          key={e.id}
+          className="flex items-start gap-3 px-3 py-2.5 rounded-lg"
+          style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)" }}
+        >
+          <Badge variant={SEVERITY_VARIANT[e.severity] ?? "neutral"} className="shrink-0 mt-0.5">
+            {e.severity}
+          </Badge>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-medium" style={{ color: "var(--text-primary)" }}>
+              {(e.notification_log as Record<string, string> | null)?.rule_name ?? "Alert"}
+            </p>
+            <p className="text-xs mt-0.5" style={{ color: "var(--text-tertiary)" }}>
+              Value: {e.triggered_value} · {formatDateTime(e.triggered_at)}
+            </p>
           </div>
-          <Button variant="secondary" onClick={() => acknowledge(e.id)}>Acknowledge</Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<CheckCheck size={13} />}
+            onClick={() => ack(e.id)}
+          >
+            Ack
+          </Button>
         </div>
       ))}
     </div>

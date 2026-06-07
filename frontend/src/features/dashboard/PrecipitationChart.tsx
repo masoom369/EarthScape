@@ -1,24 +1,43 @@
-import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { theme } from '../../styles/theme';
-import type { ClimateSummaryItem } from '../../types/climate';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer,
+} from "recharts";
+import type { ClimateSummaryResponse } from "@/types/climate";
+import Spinner from "@/components/ui/Spinner";
+import EmptyState from "@/components/ui/EmptyState";
+import { CloudRain } from "lucide-react";
 
-export function PrecipitationChart({ data }: { data: ClimateSummaryItem[] }) {
-  const chartData = data.map((d) => ({
-    label: `${d.region} ${d.period}`,
-    precipitation: d.total_precipitation_mm || 0,
-  }));
+interface Props {
+  summary: ClimateSummaryResponse | null;
+  loading: boolean;
+}
+
+export default function PrecipitationChart({ summary, loading }: Props) {
+  if (loading) return <div className="h-64 flex items-center justify-center"><Spinner /></div>;
+  if (!summary?.items.length) {
+    return <EmptyState icon={<CloudRain size={22} />} title="No precipitation data" />;
+  }
+
+  const byPeriod: Record<string, number> = {};
+  for (const item of summary.items) {
+    byPeriod[item.period] = (byPeriod[item.period] ?? 0) + (item.total_precipitation_mm ?? 0);
+  }
+  const data = Object.entries(byPeriod)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .slice(-12)
+    .map(([period, total]) => ({ period, total: Math.round(total) }));
 
   return (
-    <div style={{ background: theme.colors.surface, padding: theme.spacing.lg, borderRadius: theme.radius.lg }}>
-      <h3>Precipitation by Region</h3>
-      <ResponsiveContainer width="100%" height={280}>
-        <BarChart data={chartData}>
-          <XAxis dataKey="label" tick={{ fontSize: 10 }} />
-          <YAxis />
-          <Tooltip />
-          <Bar dataKey="precipitation" fill={theme.chartPalette[1]} />
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
+    <ResponsiveContainer width="100%" height={240}>
+      <BarChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" />
+        <XAxis dataKey="period" tick={{ fontSize: 11, fill: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }} />
+        <YAxis tick={{ fontSize: 11, fill: "var(--text-tertiary)" }} unit=" mm" />
+        <Tooltip
+          contentStyle={{ background: "var(--bg-elevated)", border: "1px solid var(--border-default)", borderRadius: 8, fontSize: 12 }}
+        />
+        <Bar dataKey="total" name="Precipitation mm" fill="var(--chart-2)" radius={[4, 4, 0, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
   );
 }

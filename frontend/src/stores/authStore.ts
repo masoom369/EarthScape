@@ -1,35 +1,35 @@
-import { create } from 'zustand';
-import api from '../services/api';
-import type { User } from '../types/auth';
+import { create } from "zustand";
+import type { UserProfile } from "@/types/auth";
+import api from "@/lib/api";
 
-interface AuthState {
-  user: User | null;
+interface AuthStore {
+  user: UserProfile | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  init: () => Promise<void>;
+  setUser: (u: UserProfile | null) => void;
   logout: () => Promise<void>;
-  fetchMe: () => Promise<void>;
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthStore>((set) => ({
   user: null,
   loading: true,
-  login: async (email, password) => {
-    const { data } = await api.post('/auth/login', { email, password });
-    set({ user: data });
-  },
-  logout: async () => {
+
+  init: async () => {
     try {
-      await api.post('/auth/logout');
-    } finally {
-      set({ user: null });
-    }
-  },
-  fetchMe: async () => {
-    try {
-      const { data } = await api.get('/auth/me');
+      const { data } = await api.get<UserProfile>("/auth/me");
       set({ user: data, loading: false });
     } catch {
       set({ user: null, loading: false });
+    }
+  },
+
+  setUser: (user) => set({ user }),
+
+  logout: async () => {
+    try {
+      await api.post("/auth/logout");
+    } finally {
+      set({ user: null });
     }
   },
 }));

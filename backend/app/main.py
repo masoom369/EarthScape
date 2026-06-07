@@ -74,11 +74,11 @@ async def runtime_error_handler(request: Request, exc: RuntimeError):
 
 
 # All routers on the single app — no sub-app mount, ensures middleware applies everywhere
-app.include_router(auth.router,    prefix="/api/v1")
-app.include_router(users.router,   prefix="/api/v1")
-app.include_router(ingest.router,  prefix="/api/v1")
-app.include_router(jobs.router,    prefix="/api/v1")
-app.include_router(climate.router, prefix="/api/v1")
-app.include_router(alerts.router,  prefix="/api/v1")
-app.include_router(support.router, prefix="/api/v1")
+app.include_router(auth.router,    prefix="/api/")
+app.include_router(users.router,   prefix="/api/")
+app.include_router(ingest.router,  prefix="/api/")
+app.include_router(jobs.router,    prefix="/api/")
+app.include_router(climate.router, prefix="/api/")
+app.include_router(alerts.router,  prefix="/api/")
+app.include_router(support.router, prefix="/api/")
 app.include_router(system.router)

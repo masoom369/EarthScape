@@ -1,14 +1,14 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef } from "react";
 
-export function usePoll(callback: () => void | Promise<void>, intervalMs: number, enabled = true) {
-  const saved = useRef(callback);
-  saved.current = callback;
+/** Generic polling hook. interval read from env — never hardcoded at call site. */
+export function usePoll(fn: () => void, intervalMs: number, enabled = true) {
+  const fnRef = useRef(fn);
+  fnRef.current = fn;
 
   useEffect(() => {
-    if (!enabled || intervalMs <= 0) return undefined;
-    const tick = () => { saved.current(); };
-    tick();
-    const id = setInterval(tick, intervalMs);
+    if (!enabled) return;
+    fn();
+    const id = setInterval(() => fnRef.current(), intervalMs);
     return () => clearInterval(id);
-  }, [intervalMs, enabled]);
+  }, [intervalMs, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 }

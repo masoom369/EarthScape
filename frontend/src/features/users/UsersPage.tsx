@@ -1,24 +1,167 @@
-import { useCallback, useEffect, useState } from 'react';
-import api from '../../services/api';
-import { theme } from '../../styles/theme';
-import { CreateUserForm } from './CreateUserForm';
-import { UserTable } from './UserTable';
+import { useState, useCallback } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { Plus, UserX } from "lucide-react";
+import { toast } from "sonner";
+import api from "@/lib/api";
+import PageHeader from "@/components/ui/PageHeader";
+import { Card, CardHeader, CardTitle } from "@/components/ui/Card";
+import Button from "@/components/ui/Button";
+import Badge from "@/components/ui/Badge";
+import Input from "@/components/ui/Input";
+import Select from "@/components/ui/Select";
+import Modal from "@/components/ui/Modal";
+import { Table, Thead, Th, Tbody, Tr, Td } from "@/components/ui/Table";
+import Pagination from "@/components/ui/Pagination";
+import { formatDate } from "@/lib/utils";
+import type { UserResponse, PaginatedUsers } from "@/types/user";
 
-export function UsersPage() {
-  const [users, setUsers] = useState<Array<{ id: string; email: string; role: string; is_active: boolean }>>([]);
+interface UserResponse {
+  id: string;
+  email: string;
+  role: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+interface PaginatedUsers {
+  items: UserResponse[];
+  total: number;
+  page: number;
+  limit: number;
+}
 
-  const fetchUsers = useCallback(async () => {
-    const { data } = await api.get('/users', { params: { limit: 100 } });
+const createSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8),
+  role: z.enum(["admin", "analyst", "viewer"]),
+});
+type CreateForm = z.infer<typeof createSchema>;
+
+const ROLE_VARIANT: Record<string, "danger" | "info" | "neutral"> = {
+  admin: "danger",
+  analyst: "info",
+  viewer: "neutral",
+};
+
+export default function UsersPage() {
+  const [users, setUsers] = useState<UserResponse[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [showModal, setShowModal] = useState(false);
+
+  const loadUsers = useCallback(async (p = 1) => {
+    const { data } = await api.get<PaginatedUsers>(`/users?page=${p}&limit=20`);
     setUsers(data.items);
+    setTotal(data.total);
   }, []);
 
-  useEffect(() => { fetchUsers(); }, [fetchUsers]);
+  useState(() => { loadUsers(1); });
+
+  const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<CreateForm>({
+    resolver: zodResolver(createSchema),
+    defaultValues: { role: "viewer" },
+  });
+
+  async function onCreate(data: CreateForm) {
+    try {
+      await api.post("/users", data);
+      toast.success("User created");
+      setShowModal(false);
+      reset();
+      loadUsers(1);
+    } catch {
+      toast.error("Failed to create user");
+    }
+  }
+
+  async function deactivate(id: string) {
+    try {
+      await api.delete(`/users/${id}`);
+      toast.success("User deactivated");
+      loadUsers(page);
+    } catch {
+      toast.error("Failed to deactivate");
+    }
+  }
 
   return (
-    <div>
-      <h1 style={{ color: theme.colors.primary }}>User Management</h1>
-      <CreateUserForm onCreated={fetchUsers} />
-      <UserTable users={users} onChanged={fetchUsers} />
+    <div className="space-y-6 animate-fade-up">
+      <PageHeader
+        title="Users"
+        description="Manage platform access and roles"
+        action={
+          <Button icon={<Plus size={14} />} onClick={() => setShowModal(true)}>
+            Add User
+          </Button>
+        }
+      />
+
+      <Card>
+        <CardHeader>
+          <CardTitle>All Users</CardTitle>
+          <span className="text-xs" style={{ color: "var(--text-tertiary)" }}>{total} total</span>
+        </CardHeader>
+        <Table>
+          <Thead>
+            <tr>
+              <Th>Email</Th>
+              <Th>Role</Th>
+              <Th>Status</Th>
+              <Th>Created</Th>
+              <Th>Actions</Th>
+            </tr>
+          </Thead>
+          <Tbody>
+            {users.map((u) => (
+              <Tr key={u.id}>
+                <Td>
+                  <span className="text-xs font-medium" style={{ fontFamily: "var(--font-mono)" }}>
+                    {u.email}
+                  </span>
+                </Td>
+                <Td><Badge variant={ROLE_VARIANT[u.role] ?? "neutral"}>{u.role}</Badge></Td>
+                <Td>
+                  <Badge variant={u.is_active ? "success" : "danger"}>
+                    {u.is_active ? "Active" : "Inactive"}
+                  </Badge>
+                </Td>
+                <Td><span className="text-xs" style={{ color: "var(--text-tertiary)" }}>{formatDate(u.created_at)}</span></Td>
+                <Td>
+                  {u.is_active && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon={<UserX size={13} />}
+                      onClick={() => deactivate(u.id)}
+                    >
+                      Deactivate
+                    </Button>
+                  )}
+                </Td>
+              </Tr>
+            ))}
+          </Tbody>
+        </Table>
+        <Pagination page={page} total={total} limit={20} onChange={(p) => { setPage(p); loadUsers(p); }} />
+      </Card>
+
+      <Modal open={showModal} onClose={() => setShowModal(false)} title="Create User">
+        <form onSubmit={handleSubmit(onCreate)} className="space-y-4">
+          <Input label="Email" type="email" error={errors.email?.message} {...register("email")} />
+          <Input label="Password" type="password" error={errors.password?.message} {...register("password")} />
+          <Select label="Role" {...register("role")}>
+            <option value="viewer">Viewer</option>
+            <option value="analyst">Analyst</option>
+            <option value="admin">Admin</option>
+          </Select>
+          <div className="flex gap-3 justify-end pt-2">
+            <Button type="button" variant="secondary" onClick={() => setShowModal(false)}>Cancel</Button>
+            <Button type="submit" loading={isSubmitting}>Create User</Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

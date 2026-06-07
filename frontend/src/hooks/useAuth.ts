@@ -1,8 +1,16 @@
-import { useAuthStore } from '../stores/authStore';
-import type { Role } from '../types/auth';
+import { useAuthStore } from "@/stores/authStore";
 
 export function useAuth() {
-  const { user, loading, login, logout } = useAuthStore();
-  const hasRole = (...roles: Role[]) => user !== null && roles.includes(user.role);
-  return { user, loading, login, logout, hasRole, isAdmin: user?.role === 'admin', isAnalyst: user?.role === 'analyst' || user?.role === 'admin' };
+  const user = useAuthStore((s) => s.user);
+  const loading = useAuthStore((s) => s.loading);
+  const logout = useAuthStore((s) => s.logout);
+
+  return {
+    user,
+    loading,
+    logout,
+    isAdmin: user?.role === "admin",
+    isAnalyst: user?.role === "analyst",
+    can: (...roles: string[]) => !!user && roles.includes(user.role),
+  };
 }

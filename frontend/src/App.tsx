@@ -1,53 +1,81 @@
-import { useEffect } from 'react';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
-import { Layout } from './components/Layout';
-import { LoginPage } from './features/auth/LoginPage';
-import { ProtectedRoute } from './features/auth/ProtectedRoute';
-import { AlertsPage } from './features/alerts/AlertsPage';
-import { ClimateExplorerPage } from './features/climate/ClimateExplorerPage';
-import { DashboardPage } from './features/dashboard/DashboardPage';
-import { HelpPage } from './features/help/HelpPage';
-import { IngestionPage } from './features/ingestion/IngestionPage';
-import { JobsPage } from './features/jobs/JobsPage';
-import { SupportPage } from './features/support/SupportPage';
-import { UsersPage } from './features/users/UsersPage';
-import { useAuthStore } from './stores/authStore';
+import { useEffect } from "react";
+import { Routes, Route, Navigate } from "react-router-dom";
+import { useThemeStore } from "@/stores/themeStore";
+import { useAuthStore } from "@/stores/authStore";
+import ProtectedRoute from "@/features/auth/ProtectedRoute";
+import AppShell from "@/components/AppShell";
+import LoginPage from "@/features/auth/LoginPage";
+import DashboardPage from "@/features/dashboard/DashboardPage";
+import IngestionPage from "@/features/ingestion/IngestionPage";
+import JobsPage from "@/features/jobs/JobsPage";
+import ClimateExplorerPage from "@/features/climate/ClimateExplorerPage";
+import AlertsPage from "@/features/alerts/AlertsPage";
+import UsersPage from "@/features/users/UsersPage";
+import SupportPage from "@/features/support/SupportPage";
+import HelpPage from "@/features/help/HelpPage";
 
 export default function App() {
-  const fetchMe = useAuthStore((s) => s.fetchMe);
+  const theme = useThemeStore((s) => s.theme);
+  const initAuth = useAuthStore((s) => s.init);
 
   useEffect(() => {
-    if (import.meta.env.DEV) {
-      const start = performance.now();
-      window.addEventListener('load', () => {
-        console.debug(`[Perf] Page load: ${(performance.now() - start).toFixed(0)}ms`);
-      });
-    }
-    fetchMe();
-  }, [fetchMe]);
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
+
+  useEffect(() => {
+    initAuth();
+  }, [initAuth]);
 
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route element={<ProtectedRoute />}>
-          <Route element={<Layout />}>
-            <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/climate" element={<ClimateExplorerPage />} />
-            <Route path="/support" element={<SupportPage />} />
-            <Route path="/help" element={<HelpPage />} />
-            <Route element={<ProtectedRoute roles={['admin', 'analyst']} />}>
-              <Route path="/ingest" element={<IngestionPage />} />
-              <Route path="/jobs" element={<JobsPage />} />
-            </Route>
-            <Route element={<ProtectedRoute roles={['admin']} />}>
-              <Route path="/alerts" element={<AlertsPage />} />
-              <Route path="/users" element={<UsersPage />} />
-            </Route>
-          </Route>
-        </Route>
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
-      </Routes>
-    </BrowserRouter>
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route
+        path="/"
+        element={
+          <ProtectedRoute>
+            <AppShell />
+          </ProtectedRoute>
+        }
+      >
+        <Route index element={<Navigate to="/dashboard" replace />} />
+        <Route path="dashboard" element={<DashboardPage />} />
+        <Route
+          path="ingest"
+          element={
+            <ProtectedRoute roles={["admin", "analyst"]}>
+              <IngestionPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="jobs"
+          element={
+            <ProtectedRoute roles={["admin", "analyst"]}>
+              <JobsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="climate" element={<ClimateExplorerPage />} />
+        <Route
+          path="alerts"
+          element={
+            <ProtectedRoute roles={["admin"]}>
+              <AlertsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="users"
+          element={
+            <ProtectedRoute roles={["admin"]}>
+              <UsersPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="support" element={<SupportPage />} />
+        <Route path="help" element={<HelpPage />} />
+      </Route>
+      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+    </Routes>
   );
 }

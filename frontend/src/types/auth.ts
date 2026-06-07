@@ -1,8 +1,11 @@
-export type Role = 'admin' | 'analyst' | 'viewer';
-
-export interface User {
+export interface UserProfile {
   id: string;
   email: string;
-  role: Role;
+  role: "admin" | "analyst" | "viewer";
   is_active: boolean;
+}
+
+export interface LoginRequest {
+  email: string;
+  password: string;
 }

@@ -1,10 +1,14 @@
+export type AlertSeverity = "low" | "medium" | "high";
+export type AlertMetric = "temperature_c" | "precipitation_mm" | "co2_ppm" | "humidity_pct";
+export type AlertOperator = ">" | "<" | "=" | ">=" | "<=";
+
 export interface AlertRule {
   id: string;
   name: string;
-  metric: string;
-  operator: string;
+  metric: AlertMetric;
+  operator: AlertOperator;
   threshold: number;
-  severity: string;
+  severity: AlertSeverity;
   is_active: boolean;
   created_by: string;
   created_at: string;
@@ -15,7 +19,16 @@ export interface AlertEvent {
   rule_id: string;
   climate_record_id: string;
   triggered_value: number;
-  severity: string;
+  severity: AlertSeverity;
   acknowledged: boolean;
+  acknowledged_by: string | null;
   triggered_at: string;
+  notification_log: Record<string, unknown> | null;
+}
+
+export interface PaginatedAlertEvents {
+  items: AlertEvent[];
+  total: number;
+  page: number;
+  limit: number;
 }
