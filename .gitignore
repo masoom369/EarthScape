@@ -11,5 +11,4 @@ dist/
 .ruff_cache/
 /backups/
 tools/
-backend/seed_data/
 docs/
