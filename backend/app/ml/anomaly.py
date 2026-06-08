@@ -9,10 +9,10 @@ from sklearn.ensemble import IsolationForest
 def train_anomaly_model(records: list[dict]) -> dict[str, Any]:
     """
     Train Isolation Forest on temperature_c and precipitation_mm.
-
-    Input:  list of climate_record dicts with _id, temperature_c, precipitation_mm.
-    Output: predictions list, anomaly_record_ids, accuracy_score (illustrative — measures
-            how close detected rate is to contamination param, not true classification accuracy).
+    MAJOR #13: records missing BOTH metrics are dropped entirely.
+    Records missing only one metric are also dropped — imputing 0.0 skews z-scores
+    and treats absence as an extreme low value, producing false anomaly signals.
+    Callers must pass sufficient records (>=10) after filtering for meaningful results.
     """
     features: list[list[float]] = []
     ids: list[str] = []
@@ -20,12 +20,10 @@ def train_anomaly_model(records: list[dict]) -> dict[str, Any]:
     for rec in records:
         temp = rec.get("temperature_c")
         precip = rec.get("precipitation_mm")
-        if temp is None and precip is None:
+        # MAJOR #13 fix: require both fields; drop records where either is missing
+        if temp is None or precip is None:
             continue
-        features.append([
-            float(temp) if temp is not None else 0.0,
-            float(precip) if precip is not None else 0.0,
-        ])
+        features.append([float(temp), float(precip)])
         ids.append(str(rec["_id"]))
 
     if len(features) < 10:
@@ -49,7 +47,6 @@ def train_anomaly_model(records: list[dict]) -> dict[str, Any]:
         if is_anomaly:
             anomaly_ids.append(ids[i])
 
-    # Illustrative metric: proximity of detected rate to contamination param
     anomaly_rate = len(anomaly_ids) / len(predictions) if predictions else 0.0
     accuracy = round(1.0 - abs(anomaly_rate - 0.05), 4)
 

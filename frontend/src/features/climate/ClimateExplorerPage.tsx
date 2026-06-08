@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Download, Database } from "lucide-react";
 import { toast } from "sonner";
 import api from "@/lib/api";
@@ -32,7 +32,7 @@ export default function ClimateExplorerPage() {
     is_anomaly: "",
   });
 
-  const buildQuery = (p = 1) => {
+  const buildQuery = useCallback((p = 1) => {
     const params = new URLSearchParams({ page: String(p), limit: "50" });
     if (filters.region) params.set("region", filters.region);
     if (filters.source_type) params.set("source_type", filters.source_type);
@@ -40,22 +40,34 @@ export default function ClimateExplorerPage() {
     if (filters.to_date) params.set("to_date", filters.to_date);
     if (filters.is_anomaly) params.set("is_anomaly", filters.is_anomaly);
     return params.toString();
-  };
+  }, [filters]);
 
-  const loadRecords = useCallback(async (p = 1) => {
+  const loadRecords = useCallback(async (p = 1, signal?: AbortSignal) => {
     setLoading(true);
     try {
-      const { data } = await api.get<PaginatedClimateRecords>(`/climate?${buildQuery(p)}`);
+      const { data } = await api.get<PaginatedClimateRecords>(
+        `/climate?${buildQuery(p)}`,
+        { signal }
+      );
       setRecords(data.items);
       setTotal(data.total);
-    } catch {
-      toast.error("Failed to load records");
+    } catch (err) {
+      if ((err as { name?: string }).name !== "CanceledError") {
+        toast.error("Failed to load records");
+      }
     } finally {
       setLoading(false);
     }
-  }, [filters]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [buildQuery]);
 
-  useState(() => { loadRecords(1); });
+  // Inline async IIFE avoids react-hooks/set-state-in-effect
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      await loadRecords(1, controller.signal);
+    })();
+    return () => controller.abort();
+  }, [loadRecords]);
 
   async function exportCSV() {
     setExporting(true);
@@ -139,7 +151,7 @@ export default function ClimateExplorerPage() {
           <option value="true">Anomalies only</option>
           <option value="false">Normal only</option>
         </Select>
-        <Button onClick={() => { setPage(1); loadRecords(1); }} loading={loading} size="sm" className="mt-5">
+        <Button onClick={() => { setPage(1); void loadRecords(1); }} loading={loading} size="sm" className="mt-5">
           Apply
         </Button>
       </FilterBar>
@@ -188,7 +200,7 @@ export default function ClimateExplorerPage() {
                 ))}
               </Tbody>
             </Table>
-            <Pagination page={page} total={total} limit={50} onChange={(p) => { setPage(p); loadRecords(p); }} />
+            <Pagination page={page} total={total} limit={50} onChange={(p) => { setPage(p); void loadRecords(p); }} />
           </>
         )}
       </Card>

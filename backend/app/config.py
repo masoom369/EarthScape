@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = 60
     hdfs_namenode_host: str = "localhost"
     hdfs_webhdfs_port: int = 9870
+    # MAJOR #6: configurable DataNode rewrite host — empty = no rewrite (remote cluster)
+    hdfs_datanode_rewrite_host: str = "localhost"
     yarn_rm_port: int = 8088
     hadoop_streaming_jar: str = (
         "/usr/local/hadoop/share/hadoop/tools/lib/hadoop-streaming-3.3.6.jar"

@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
 import { Upload, FileText, CheckCircle, XCircle, Clock } from "lucide-react";
 import { toast } from "sonner";
@@ -34,18 +34,30 @@ export default function IngestionPage() {
   const [sourceType, setSourceType] = useState("weather_station");
   const [logsLoaded, setLogsLoaded] = useState(false);
 
-  const loadLogs = useCallback(async (p = 1) => {
+  const loadLogs = useCallback(async (p = 1, signal?: AbortSignal) => {
     try {
-      const { data } = await api.get<PaginatedIngestionLogs>(`/ingest/logs?page=${p}&limit=20`);
+      const { data } = await api.get<PaginatedIngestionLogs>(
+        `/ingest/logs?page=${p}&limit=20`,
+        { signal }
+      );
       setLogs(data.items);
       setTotal(data.total);
       setLogsLoaded(true);
-    } catch {
-      toast.error("Failed to load ingestion logs");
+    } catch (err) {
+      if ((err as { name?: string }).name !== "CanceledError") {
+        toast.error("Failed to load ingestion logs");
+      }
     }
   }, []);
 
-  useState(() => { loadLogs(1); });
+  // Inline async IIFE avoids react-hooks/set-state-in-effect
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      await loadLogs(1, controller.signal);
+    })();
+    return () => controller.abort();
+  }, [loadLogs]);
 
   const onDrop = useCallback(
     async (files: File[]) => {
@@ -60,7 +72,7 @@ export default function IngestionPage() {
           headers: { "Content-Type": "multipart/form-data" },
         });
         toast.success(`Ingested: ${file.name}`);
-        loadLogs(1);
+        void loadLogs(1);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Upload failed";
         toast.error(msg);
@@ -85,7 +97,6 @@ export default function IngestionPage() {
     <div className="space-y-6 animate-fade-up">
       <PageHeader title="Data Ingestion" description="Upload climate datasets to HDFS" />
 
-      {/* Upload zone */}
       <Card>
         <CardHeader>
           <CardTitle>Upload Dataset</CardTitle>
@@ -123,11 +134,10 @@ export default function IngestionPage() {
         </div>
       </Card>
 
-      {/* Logs table */}
       <Card>
         <CardHeader>
           <CardTitle>Ingestion Log</CardTitle>
-          <Button variant="secondary" size="sm" onClick={() => loadLogs(page)}>
+          <Button variant="secondary" size="sm" onClick={() => void loadLogs(page)}>
             Refresh
           </Button>
         </CardHeader>
@@ -183,7 +193,7 @@ export default function IngestionPage() {
               page={page}
               total={total}
               limit={20}
-              onChange={(p) => { setPage(p); loadLogs(p); }}
+              onChange={(p) => { setPage(p); void loadLogs(p); }}
             />
           </>
         )}

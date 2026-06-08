@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -43,13 +43,29 @@ export default function SupportPage() {
   const [adminResponse, setAdminResponse] = useState("");
   const [responding, setResponding] = useState(false);
 
-  const load = useCallback(async (p = 1) => {
-    const { data } = await api.get<PaginatedTickets>(`/support/tickets?page=${p}&limit=20`);
-    setTickets(data.items);
-    setTotal(data.total);
+  const load = useCallback(async (p = 1, signal?: AbortSignal) => {
+    try {
+      const { data } = await api.get<PaginatedTickets>(
+        `/support/tickets?page=${p}&limit=20`,
+        { signal }
+      );
+      setTickets(data.items);
+      setTotal(data.total);
+    } catch (err) {
+      if ((err as { name?: string }).name !== "CanceledError") {
+        toast.error("Failed to load tickets");
+      }
+    }
   }, []);
 
-  useState(() => { load(1); });
+  // Inline async IIFE avoids react-hooks/set-state-in-effect
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      await load(1, controller.signal);
+    })();
+    return () => controller.abort();
+  }, [load]);
 
   const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<CreateForm>({
     resolver: zodResolver(createSchema),
@@ -62,7 +78,7 @@ export default function SupportPage() {
       toast.success("Ticket submitted");
       setShowModal(false);
       reset();
-      load(1);
+      void load(1);
     } catch {
       toast.error("Failed to submit ticket");
     }
@@ -78,7 +94,7 @@ export default function SupportPage() {
       toast.success("Ticket updated");
       setSelected(null);
       setAdminResponse("");
-      load(page);
+      void load(page);
     } catch {
       toast.error("Failed to update ticket");
     } finally {
@@ -141,12 +157,11 @@ export default function SupportPage() {
                 ))}
               </Tbody>
             </Table>
-            <Pagination page={page} total={total} limit={20} onChange={(p) => { setPage(p); load(p); }} />
+            <Pagination page={page} total={total} limit={20} onChange={(p) => { setPage(p); void load(p); }} />
           </>
         )}
       </Card>
 
-      {/* Create modal */}
       <Modal open={showModal} onClose={() => setShowModal(false)} title="New Support Ticket">
         <form onSubmit={handleSubmit(onCreate)} className="space-y-4">
           <Input label="Subject" error={errors.subject?.message} {...register("subject")} />
@@ -168,7 +183,6 @@ export default function SupportPage() {
         </form>
       </Modal>
 
-      {/* Admin respond modal */}
       <Modal open={!!selected} onClose={() => setSelected(null)} title="Respond to Ticket">
         {selected && (
           <div className="space-y-4">

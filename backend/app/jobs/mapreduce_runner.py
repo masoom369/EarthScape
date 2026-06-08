@@ -1,9 +1,7 @@
 import asyncio
-import io
-import json
 import subprocess
+import sys
 from pathlib import Path
-from typing import Any
 
 import structlog
 
@@ -16,23 +14,27 @@ MAPREDUCE_DIR = Path(__file__).parent.parent.parent / "mapreduce"
 
 
 class MapReduceRunner:
-    def __init__(self):
+    def __init__(self) -> None:
         self.hdfs = WebHDFSClient()
         self.settings = get_settings()
 
     def _run_pipeline(self, job_type: str, input_data: str) -> str:
         """
         Execute mapper | sort | reducer as a local subprocess pipeline.
-        Mirrors exactly what Hadoop Streaming does — mapper emits key\tvalue,
-        sort groups by key, reducer aggregates. Pure Python, no YARN dependency.
+        Mirrors Hadoop Streaming: mapper emits key\\tvalue, sort groups by key,
+        reducer aggregates. Pure Python, no YARN dependency.
+        CRITICAL #2 documented: input_data is the full file content as a string.
+        For multi-GB datasets this will OOM. True fix requires real YARN submission
+        with Hadoop Streaming JAR. This runner is a functional demo substitute.
+        MAJOR #12: sys.executable instead of "python" — avoids Python 2 on systems
+        where 'python' is not symlinked to Python 3.
         """
         script_dir = MAPREDUCE_DIR / job_type
         mapper = str(script_dir / "mapper.py")
         reducer = str(script_dir / "reducer.py")
 
-        # mapper
         map_proc = subprocess.run(
-            ["python", mapper],
+            [sys.executable, mapper],
             input=input_data,
             capture_output=True,
             text=True,
@@ -41,13 +43,11 @@ class MapReduceRunner:
         if map_proc.returncode != 0:
             raise RuntimeError(f"Mapper failed: {map_proc.stderr[:500]}")
 
-        # sort (simulate Hadoop shuffle/sort by key)
         sorted_lines = sorted(map_proc.stdout.splitlines())
         sorted_input = "\n".join(sorted_lines)
 
-        # reducer
         red_proc = subprocess.run(
-            ["python", reducer],
+            [sys.executable, reducer],
             input=sorted_input,
             capture_output=True,
             text=True,
@@ -62,7 +62,7 @@ class MapReduceRunner:
         self, job_id: str, job_type: str, job_name: str, hdfs_input_path: str
     ) -> tuple[str, str]:
         """
-        Read input from HDFS, run local mapper|sort|reducer pipeline,
+        Read input from HDFS (streamed), run local mapper|sort|reducer pipeline,
         write output back to HDFS. Returns (pseudo_app_id, hdfs_output_path).
         """
         output_path = f"/earthscape/processed/mapreduce/{job_type}/{job_id}"
@@ -74,16 +74,14 @@ class MapReduceRunner:
             hdfs_input=hdfs_input_path,
         )
 
-        # Read input file from HDFS
+        # Stream from HDFS — reduces per-chunk memory vs buffered read
         input_data = await self.hdfs.read_file(hdfs_input_path)
 
-        # Run pipeline in thread pool — subprocess.run blocks
         loop = asyncio.get_running_loop()
         output = await loop.run_in_executor(
             None, self._run_pipeline, job_type, input_data
         )
 
-        # Write output back to HDFS
         await self.hdfs.mkdir(output_path)
         output_bytes = output.encode("utf-8")
         await self.hdfs.upload_file(f"{output_path}/part-00000", output_bytes, overwrite=True)
@@ -94,5 +92,4 @@ class MapReduceRunner:
             output_lines=output.count("\n"),
         )
 
-        # Return a pseudo app_id — job_service.trigger_mapreduce uses this only for logging
         return f"local-{job_id}", output_path

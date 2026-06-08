@@ -9,6 +9,7 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from app.config import get_settings
 from app.db.mongo import connect, create_indexes, disconnect
+from app.db.seed import run_seed
 from app.middleware.logging import RequestLoggingMiddleware
 from app.routes import alerts, auth, climate, ingest, jobs, support, system, users
 from app.routes.ingest import limiter
@@ -30,10 +31,13 @@ async def lifespan(app: FastAPI):
     try:
         await connect()
         await create_indexes()
+        # Ensure default admin exists (does nothing if users already exist)
         await AuthService().ensure_default_admin(
             settings.default_admin_email,
             settings.default_admin_password,
         )
+        # Seed database if empty — idempotent, safe every boot
+        await run_seed(settings.default_admin_email, settings.default_admin_password)
         logger.info("startup_complete", mongo_db=settings.mongo_db)
     except Exception as exc:
         logger.error("startup_failed", error=str(exc))
@@ -52,7 +56,6 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# Middleware — order matters: CORS first, then logging, then rate-limit
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
@@ -73,7 +76,6 @@ async def runtime_error_handler(request: Request, exc: RuntimeError):
     raise exc
 
 
-# All routers on the single app — no sub-app mount, ensures middleware applies everywhere
 app.include_router(auth.router,    prefix="/api")
 app.include_router(users.router,   prefix="/api")
 app.include_router(ingest.router,  prefix="/api")

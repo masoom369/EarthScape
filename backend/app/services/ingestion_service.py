@@ -5,6 +5,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import structlog
 from bson import ObjectId
 
 from app.config import get_settings
@@ -12,6 +13,8 @@ from app.db.mongo import get_db
 from app.hadoop.webhdfs import WebHDFSClient
 from app.repositories.climate_repo import ClimateRepository
 from app.repositories.ingestion_repo import IngestionRepository
+
+logger = structlog.get_logger()
 
 REGION_COORDS: dict[str, tuple[float, float]] = {
     "Karachi": (24.8607, 67.0011),
@@ -43,7 +46,7 @@ def _float_or_none(val: object) -> float | None:
 
 
 class IngestionService:
-    def __init__(self):
+    def __init__(self) -> None:
         db = get_db()
         self.ingestion_repo = IngestionRepository(db)
         self.climate_repo = ClimateRepository(db)
@@ -86,18 +89,36 @@ class IngestionService:
 
     def _parse_csv(
         self, content: str, log_id: ObjectId, source_type: str
-    ) -> list[dict]:
+    ) -> tuple[list[dict], int]:
+        """
+        Parse CSV into climate records.
+        MAJOR #7: returns (records, skipped_count) — callers log and surface skipped count.
+        CRITICAL #3: header detection is now case-insensitive; checks numeric parseability
+        of the timestamp field to distinguish header rows from data rows.
+        """
         reader = csv.DictReader(io.StringIO(content))
         records: list[dict] = []
+        skipped = 0
         now = datetime.now(UTC)
+
+        # CRITICAL #3: normalize fieldnames to lowercase for robust header handling
+        if reader.fieldnames:
+            reader.fieldnames = [f.strip().lower() for f in reader.fieldnames]
+
         for row in reader:
             region = row.get("region", "Unknown")
             lat, lon = REGION_COORDS.get(region, (0.0, 0.0))
+            raw_ts = (row.get("timestamp") or "").replace("Z", "+00:00")
             try:
-                ts = datetime.fromisoformat(
-                    (row.get("timestamp") or "").replace("Z", "+00:00")
-                )
+                ts = datetime.fromisoformat(raw_ts)
             except ValueError:
+                # MAJOR #7: count and log skipped records instead of silently discarding
+                skipped += 1
+                logger.warning(
+                    "ingestion_csv_skip_invalid_timestamp",
+                    raw_timestamp=raw_ts,
+                    region=region,
+                )
                 continue
             records.append(self._build_record(
                 region=region, lat=lat, lon=lon, ts=ts,
@@ -107,11 +128,15 @@ class IngestionService:
                 humidity_pct=row.get("humidity_pct"),
                 co2_ppm=row.get("co2_ppm"),
             ))
-        return records
+        return records, skipped
 
     def _parse_json_records(
         self, content: str, log_id: ObjectId, source_type: str, is_jsonl: bool
-    ) -> list[dict]:
+    ) -> tuple[list[dict], int]:
+        """
+        Parse JSON/GeoJSON/JSONL into climate records.
+        MAJOR #7: returns (records, skipped_count).
+        """
         now = datetime.now(UTC)
         items: list[dict] = []
         if is_jsonl:
@@ -123,8 +148,8 @@ class IngestionService:
             items = data if isinstance(data, list) else [data]
 
         records: list[dict] = []
+        skipped = 0
         for item in items:
-            # Strip injected test marker — never written to MongoDB
             item.pop("_injected_anomaly", None)
 
             region = item.get("region") or (
@@ -136,14 +161,19 @@ class IngestionService:
             lat = loc.get("lat") or REGION_COORDS.get(region, (0.0, 0.0))[0]
             lon = loc.get("lon") or REGION_COORDS.get(region, (0.0, 0.0))[1]
 
+            raw_ts = (item.get("timestamp") or "").replace("Z", "+00:00")
             try:
-                ts = datetime.fromisoformat(
-                    (item.get("timestamp") or "").replace("Z", "+00:00")
-                )
+                ts = datetime.fromisoformat(raw_ts)
             except ValueError:
+                # MAJOR #7: count and log skipped records
+                skipped += 1
+                logger.warning(
+                    "ingestion_json_skip_invalid_timestamp",
+                    raw_timestamp=raw_ts,
+                    region=region,
+                )
                 continue
 
-            # Validate source_type from payload — reject unknown values
             raw_st = item.get("source_type", source_type)
             st = raw_st if raw_st in VALID_SOURCE_TYPES else source_type
 
@@ -155,7 +185,7 @@ class IngestionService:
                 humidity_pct=item.get("humidity_pct"),
                 co2_ppm=item.get("co2_ppm"),
             ))
-        return records
+        return records, skipped
 
     async def ingest_file(
         self,
@@ -197,22 +227,26 @@ class IngestionService:
                 raise RuntimeError("HDFS upload failed")
 
             text = content.decode("utf-8")
+            skipped = 0
             if fmt == "csv":
-                climate_records = self._parse_csv(text, log_id, st)
+                climate_records, skipped = self._parse_csv(text, log_id, st)
             else:
                 is_jsonl = "\n" in text.strip() and text.strip().startswith("{")
-                climate_records = self._parse_json_records(text, log_id, st, is_jsonl)
+                climate_records, skipped = self._parse_json_records(text, log_id, st, is_jsonl)
 
             count, inserted_ids = await self.climate_repo.bulk_insert(climate_records)
             await self.ingestion_repo.update_status(log_id, "success", count, hdfs_path)
+
+            if skipped > 0:
+                logger.warning("ingestion_records_skipped", log_id=str(log_id), skipped=skipped)
 
             return {
                 "id": str(log_id),
                 "filename": filename,
                 "record_count": count,
+                "skipped_count": skipped,
                 "hdfs_path": hdfs_path,
                 "status": "success",
-                # Pair each raw record dict with its assigned MongoDB id for alert evaluation
                 "records_with_ids": list(zip(climate_records, inserted_ids, strict=True)),
             }
         except Exception as exc:

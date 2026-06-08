@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -36,13 +36,26 @@ export default function UsersPage() {
   const [page, setPage] = useState(1);
   const [showModal, setShowModal] = useState(false);
 
-  const loadUsers = useCallback(async (p = 1) => {
-    const { data } = await api.get<PaginatedUsers>(`/users?page=${p}&limit=20`);
-    setUsers(data.items);
-    setTotal(data.total);
+  const loadUsers = useCallback(async (p = 1, signal?: AbortSignal) => {
+    try {
+      const { data } = await api.get<PaginatedUsers>(`/users?page=${p}&limit=20`, { signal });
+      setUsers(data.items);
+      setTotal(data.total);
+    } catch (err) {
+      if ((err as { name?: string }).name !== "CanceledError") {
+        toast.error("Failed to load users");
+      }
+    }
   }, []);
 
-  useState(() => { loadUsers(1); });
+  // Inline async IIFE avoids react-hooks/set-state-in-effect
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      await loadUsers(1, controller.signal);
+    })();
+    return () => controller.abort();
+  }, [loadUsers]);
 
   const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<CreateForm>({
     resolver: zodResolver(createSchema),
@@ -55,7 +68,7 @@ export default function UsersPage() {
       toast.success("User created");
       setShowModal(false);
       reset();
-      loadUsers(1);
+      void loadUsers(1);
     } catch {
       toast.error("Failed to create user");
     }
@@ -65,7 +78,7 @@ export default function UsersPage() {
     try {
       await api.delete(`/users/${id}`);
       toast.success("User deactivated");
-      loadUsers(page);
+      void loadUsers(page);
     } catch {
       toast.error("Failed to deactivate");
     }
@@ -129,7 +142,7 @@ export default function UsersPage() {
             ))}
           </Tbody>
         </Table>
-        <Pagination page={page} total={total} limit={20} onChange={(p) => { setPage(p); loadUsers(p); }} />
+        <Pagination page={page} total={total} limit={20} onChange={(p) => { setPage(p); void loadUsers(p); }} />
       </Card>
 
       <Modal open={showModal} onClose={() => setShowModal(false)} title="Create User">

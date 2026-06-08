@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -39,17 +39,40 @@ export default function AlertsPage() {
   const [showModal, setShowModal] = useState(false);
   const acknowledge = useAlertStore((s) => s.acknowledge);
 
-  const loadRules = useCallback(async () => {
-    const { data } = await api.get<AlertRule[]>("/alerts/rules");
-    setRules(data);
+  const loadRules = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const { data } = await api.get<AlertRule[]>("/alerts/rules", { signal });
+      setRules(data);
+    } catch (err) {
+      if ((err as { name?: string }).name !== "CanceledError") {
+        toast.error("Failed to load rules");
+      }
+    }
   }, []);
 
-  const loadEvents = useCallback(async (p = 1) => {
-    const { data } = await api.get<PaginatedAlertEvents>(`/alerts/events?page=${p}&limit=20`);
-    setEvents(data);
+  const loadEvents = useCallback(async (p = 1, signal?: AbortSignal) => {
+    try {
+      const { data } = await api.get<PaginatedAlertEvents>(
+        `/alerts/events?page=${p}&limit=20`,
+        { signal }
+      );
+      setEvents(data);
+    } catch (err) {
+      if ((err as { name?: string }).name !== "CanceledError") {
+        toast.error("Failed to load events");
+      }
+    }
   }, []);
 
-  useState(() => { loadRules(); loadEvents(1); });
+  // Inline async IIFE avoids react-hooks/set-state-in-effect — same pattern as JobsPage
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      await loadRules(controller.signal);
+      await loadEvents(1, controller.signal);
+    })();
+    return () => controller.abort();
+  }, [loadRules, loadEvents]);
 
   const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<RuleForm>({
     resolver: zodResolver(ruleSchema),
@@ -62,7 +85,7 @@ export default function AlertsPage() {
       toast.success("Rule created");
       setShowModal(false);
       reset();
-      loadRules();
+      void loadRules();
     } catch {
       toast.error("Failed to create rule");
     }
@@ -72,7 +95,7 @@ export default function AlertsPage() {
     try {
       await api.delete(`/alerts/rules/${id}`);
       toast.success("Rule deleted");
-      loadRules();
+      void loadRules();
     } catch {
       toast.error("Failed to delete rule");
     }
@@ -81,7 +104,7 @@ export default function AlertsPage() {
   async function toggleRule(rule: AlertRule) {
     try {
       await api.patch(`/alerts/rules/${rule.id}`, { is_active: !rule.is_active });
-      loadRules();
+      void loadRules();
     } catch {
       toast.error("Failed to update rule");
     }
@@ -91,7 +114,7 @@ export default function AlertsPage() {
     try {
       await api.patch(`/alerts/events/${id}/acknowledge`);
       acknowledge(id);
-      loadEvents(eventPage);
+      void loadEvents(eventPage);
     } catch {
       toast.error("Failed to acknowledge");
     }
@@ -109,7 +132,6 @@ export default function AlertsPage() {
         }
       />
 
-      {/* Rules */}
       <Card>
         <CardHeader>
           <CardTitle>Alert Rules</CardTitle>
@@ -162,11 +184,10 @@ export default function AlertsPage() {
         )}
       </Card>
 
-      {/* Events */}
       <Card>
         <CardHeader>
           <CardTitle>Alert Events</CardTitle>
-          <Button variant="secondary" size="sm" onClick={() => loadEvents(1)}>Refresh</Button>
+          <Button variant="secondary" size="sm" onClick={() => void loadEvents(1)}>Refresh</Button>
         </CardHeader>
         {events?.items.length === 0 ? (
           <EmptyState icon={<Bell size={22} />} title="No events" description="Alert events appear here when rules trigger" />
@@ -212,13 +233,12 @@ export default function AlertsPage() {
               page={eventPage}
               total={events?.total ?? 0}
               limit={20}
-              onChange={(p) => { setEventPage(p); loadEvents(p); }}
+              onChange={(p) => { setEventPage(p); void loadEvents(p); }}
             />
           </>
         )}
       </Card>
 
-      {/* Create Rule Modal */}
       <Modal open={showModal} onClose={() => setShowModal(false)} title="Create Alert Rule">
         <form onSubmit={handleSubmit(onCreateRule)} className="space-y-4">
           <Input label="Rule Name" error={errors.name?.message} {...register("name")} />
@@ -241,12 +261,7 @@ export default function AlertsPage() {
               type="number"
               step="any"
               error={errors.threshold?.message}
-              {
-                // valueAsNumber tells RHF to read the input as a JS number,
-                // not a string — this is the correct layer to do the conversion,
-                // keeping the zod schema's type a clean z.number() with no unknown.
-                ...register("threshold", { valueAsNumber: true })
-              }
+              {...register("threshold", { valueAsNumber: true })}
             />
             <Select label="Severity" {...register("severity")}>
               <option value="low">Low</option>

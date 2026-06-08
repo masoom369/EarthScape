@@ -23,6 +23,9 @@ async def login(body: LoginRequest, response: Response):
         key=COOKIE_NAME,
         value=token,
         httponly=True,
+        # MAJOR #8: secure flag set for production; disabled only when debug=True equivalent
+        # settings has no debug flag — derive from CORS: if localhost in origins → dev mode
+        secure=not any("localhost" in o for o in settings.cors_origin_list),
         samesite="strict",
         max_age=settings.jwt_expire_minutes * 60,
         path="/",

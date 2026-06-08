@@ -8,6 +8,7 @@ from app.services.alert_service import AlertService
 logger = structlog.get_logger()
 
 VALID_OPERATORS = {">", "<", "=", ">=", "<="}
+_FLOAT_EPSILON = 1e-9  # MINOR #29: safe float equality tolerance
 
 
 def _evaluate(value: float, operator: str, threshold: float) -> bool:
@@ -17,7 +18,8 @@ def _evaluate(value: float, operator: str, threshold: float) -> bool:
         case "<":
             return value < threshold
         case "=":
-            return value == threshold
+            # MINOR #29: never use == on floats; use epsilon comparison
+            return abs(value - threshold) < _FLOAT_EPSILON
         case ">=":
             return value >= threshold
         case "<=":
@@ -30,8 +32,8 @@ async def evaluate_record_alerts(record: dict, inserted_id: str) -> list[dict]:
     """
     Evaluate active alert rules against one ingested climate record.
 
-    inserted_id: the MongoDB _id string assigned after bulk_insert,
-                 passed explicitly so alert events carry a valid reference.
+    inserted_id: MongoDB _id string assigned after bulk_insert.
+    CRITICAL #1/#4 fixed: climate_record_id stored as ObjectId for referential integrity.
     """
     alert_service = AlertService()
     rules = await alert_service.get_active_rules()
@@ -61,7 +63,8 @@ async def evaluate_record_alerts(record: dict, inserted_id: str) -> list[dict]:
 
         event = await alert_repo.create_event({
             "rule_id": ObjectId(rule_id) if ObjectId.is_valid(str(rule_id)) else rule_id,
-            "climate_record_id": inserted_id,
+            # CRITICAL #1: convert to ObjectId before insert — fixes $lookup / aggregation
+            "climate_record_id": ObjectId(inserted_id) if ObjectId.is_valid(inserted_id) else inserted_id,
             "triggered_value": float(value),
             "severity": rule["severity"],
             "notification_log": notification,

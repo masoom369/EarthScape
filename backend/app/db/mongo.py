@@ -49,6 +49,8 @@ async def create_indexes() -> None:
 
     await db.alert_events.create_index([("acknowledged", 1), ("triggered_at", -1)])
     await db.alert_events.create_index("rule_id")
+    # MINOR #19: index triggered_at for time-range queries and TTL-style pagination
+    await db.alert_events.create_index([("triggered_at", -1)])
 
     await db.support_tickets.create_index([("submitted_by", 1), ("created_at", -1)])
     await db.support_tickets.create_index("status")
