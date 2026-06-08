@@ -1,12 +1,14 @@
 """Linear Regression 30-day temperature forecast per region."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 import numpy as np
 from sklearn.linear_model import LinearRegression
 
-_EPOCH = datetime(2020, 1, 1, tzinfo=UTC)
+# Naive epoch — no tzinfo so subtraction works against both naive and aware datetimes
+# after normalisation in the loop below.
+_EPOCH = datetime(2020, 1, 1)
 
 
 def train_trend_model(records: list[dict]) -> dict[str, Any]:
@@ -26,6 +28,11 @@ def train_trend_model(records: list[dict]) -> dict[str, Any]:
             continue
         if isinstance(ts, str):
             ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        # Strip tzinfo so subtraction against naive _EPOCH never raises
+        # TypeError: can't subtract offset-naive and offset-aware datetimes.
+        # Motor returns naive datetimes from MongoDB; fromisoformat may return aware.
+        if ts.tzinfo is not None:
+            ts = ts.replace(tzinfo=None)
         day_num = float((ts - _EPOCH).days)
         by_region.setdefault(region, []).append((day_num, float(temp)))
 

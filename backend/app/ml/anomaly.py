@@ -20,7 +20,6 @@ def train_anomaly_model(records: list[dict]) -> dict[str, Any]:
     for rec in records:
         temp = rec.get("temperature_c")
         precip = rec.get("precipitation_mm")
-        # MAJOR #13 fix: require both fields; drop records where either is missing
         if temp is None or precip is None:
             continue
         features.append([float(temp), float(precip)])
@@ -38,7 +37,8 @@ def train_anomaly_model(records: list[dict]) -> dict[str, Any]:
     anomaly_ids: list[str] = []
 
     for i, (label, score) in enumerate(zip(labels, scores, strict=True)):
-        is_anomaly = label == -1
+        # Cast numpy types to Python natives — MongoDB rejects np.bool_ and np.int64
+        is_anomaly = bool(label == -1)
         predictions.append({
             "record_id": ids[i],
             "score": float(score),
