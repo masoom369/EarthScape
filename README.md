@@ -122,3 +122,16 @@ Outputs to `/backups/YYYY-MM-DD/` via `mongodump`.
 
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
+
+## Synthetic Data Producer
+
+Required to populate the Dashboard's "Live Feed" panel — not started
+automatically.
+
+```powershell
+cd backend
+python scripts/producer.py --interval 10 --token <your-access_token-cookie-value>
+```
+
+Get `<your-access_token-cookie-value>` from your browser's dev tools
+(Application → Cookies → `access_token`) after logging in.
