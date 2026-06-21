@@ -11,12 +11,6 @@ Student academic project for ingesting, processing, analyzing, and visualizing c
 | MongoDB 7 | Native host | 27017 |
 | Hadoop (NameNode + DataNode + ResourceManager + NodeManager) | Docker Desktop | 9870, 8088 |
 
-> **Note on MapReduce execution:** Hadoop containers run for HDFS storage and the
-> WebHDFS/YARN health checks, but `JobsPage` MapReduce jobs execute as a **local
-> subprocess pipeline** (`mapper.py | sort | reducer.py`), not as real YARN
-> applications. This is a functional demo substitute for true distributed
-> processing — see `backend/app/jobs/mapreduce_runner.py` for details. Datasets
-> larger than available RAM will not process correctly in this mode.
 
 ## Prerequisites
 
@@ -33,8 +27,6 @@ Student academic project for ingesting, processing, analyzing, and visualizing c
 ```powershell
 mongod --dbpath C:\data\db
 ```
-
-See [database/README.md](database/README.md) for schema and index details.
 
 ### 2. Hadoop (Docker)
 
@@ -62,13 +54,7 @@ dashboard charts are populated immediately. No manual seed step is
 required for a fresh database — `scripts/seed.py` below is only for
 loading additional real datasets on top of the synthetic baseline.
 
-### 4. Seed Additional Data (optional)
-
-```powershell
-python scripts/seed.py --file seed_data/weather_stations_2023.csv
-```
-
-### 5. Frontend
+### 4. Frontend
 
 ```powershell
 cd frontend
@@ -124,21 +110,6 @@ error (`MapReduceFormatError`) instead of a subprocess crash.
 | `VITE_POLL_ALERTS_MS` | Alerts poll interval |
 | `VITE_POLL_JOBS_MS` | Jobs poll interval |
 
-## Known Limitations
-
-- **MapReduce is local, not distributed.** See note under Architecture above.
-- **Live Feed requires manually running `scripts/producer.py`.** There is no
-  automated process supplying `source_type: sensor` records — without it,
-  the Dashboard's Live Feed panel stays empty. Not included in
-  `docker-compose.yml` or any scheduler; start it manually per the section
-  below if you want to see live data.
-- **WebHDFS DataNode redirect rewriting** assumes the FastAPI backend runs
-  on the host machine, not inside the Docker network. See
-  `HDFS_DATANODE_REWRITE_HOST` above if your topology differs.
-- **Large file ingestion** (>~512 MB) may exhaust memory in the local
-  MapReduce runner, since the entire input is buffered as a string before
-  being piped to the mapper subprocess.
-
 ## Backup (Cron)
 
 ```bash
@@ -151,16 +122,3 @@ Outputs to `/backups/YYYY-MM-DD/` via `mongodump`.
 
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
-
-## Synthetic Data Producer
-
-Required to populate the Dashboard's "Live Feed" panel — not started
-automatically.
-
-```powershell
-cd backend
-python scripts/producer.py --interval 10 --token <your-access_token-cookie-value>
-```
-
-Get `<your-access_token-cookie-value>` from your browser's dev tools
-(Application → Cookies → `access_token`) after logging in.
