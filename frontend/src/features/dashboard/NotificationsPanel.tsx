@@ -56,10 +56,11 @@ export default function NotificationsPanel() {
             </p>
           </div>
           <Button
-            variant="ghost"
+            variant="success-soft"
             size="sm"
             icon={<CheckCheck size={13} />}
             onClick={() => ack(e.id)}
+            className="shrink-0"
           >
             Ack
           </Button>

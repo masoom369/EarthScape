@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
 import { Loader2 } from "lucide-react";
 
-type Variant = "primary" | "secondary" | "ghost" | "danger" | "outline";
+type Variant = "primary" | "secondary" | "ghost" | "danger" | "outline" | "success-soft";
 type Size = "sm" | "md" | "lg";
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -14,9 +14,15 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 const variantStyles: Record<Variant, React.CSSProperties> = {
   primary: { background: "var(--brand-600)", color: "white", border: "1px solid var(--brand-700)" },
   secondary: { background: "var(--bg-elevated)", color: "var(--text-primary)", border: "1px solid var(--border-default)" },
-  ghost: { background: "transparent", color: "var(--text-secondary)", border: "1px solid transparent" },
+  // Ghost now carries a subtle resting border instead of fully transparent —
+  // previously invisible against bg-surface (table action buttons read as
+  // near-blank text). Border + bg-elevated give it presence at rest, not just on hover.
+  ghost: { background: "var(--bg-elevated)", color: "var(--text-secondary)", border: "1px solid var(--border-subtle)" },
   danger: { background: "var(--danger)", color: "white", border: "1px solid var(--danger)" },
   outline: { background: "transparent", color: "var(--brand-500)", border: "1px solid var(--brand-500)" },
+  // Dedicated treatment for affirmative row actions (Ack, Approve, Resolve) —
+  // filled success tint reads as "the thing to click" instead of a ghost link.
+  "success-soft": { background: "var(--success-bg)", color: "var(--success)", border: "1px solid var(--success)" },
 };
 
 const sizeClasses: Record<Size, string> = {

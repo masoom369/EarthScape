@@ -5,7 +5,7 @@ from bson import ObjectId
 
 from app.db.mongo import get_db
 from app.hadoop.webhdfs import WebHDFSClient
-from app.jobs.mapreduce_runner import MapReduceRunner
+from app.jobs.mapreduce_runner import MapReduceFormatError, MapReduceRunner
 from app.repositories.job_repo import JobRepository
 from app.repositories.ml_repo import MLRepository
 
@@ -37,8 +37,6 @@ class JobService:
                 job_id_str, job_type, job_name, hdfs_input
             )
 
-            # Local runner completes synchronously — no YARN polling needed.
-            # YARN polling only applies when app_id is a real YARN application id.
             duration = int((datetime.now(UTC) - start).total_seconds())
 
             summary = await self._read_and_parse_output(output_path, job_type)
@@ -53,6 +51,10 @@ class JobService:
                 duration_seconds=duration,
                 hdfs_output=output_path,
             )
+        except MapReduceFormatError as exc:
+            # CRITICAL #3 fix: format mismatch is a known, actionable user error —
+            # surfaced verbatim instead of a generic "Mapper failed" stack trace.
+            await self.job_repo.update_status(job_id, "failed", error=str(exc))
         except Exception as exc:
             await self.job_repo.update_status(job_id, "failed", error=str(exc))
 

@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, UserX } from "lucide-react";
+import { Plus, UserX, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import PageHeader from "@/components/ui/PageHeader";
@@ -35,6 +35,9 @@ export default function UsersPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [showModal, setShowModal] = useState(false);
+  // Per-row pending state so toggling one user's status doesn't disable every
+  // button in the table — mirrors AlertsPage's toggleRule UX, scoped by id.
+  const [pendingId, setPendingId] = useState<string | null>(null);
 
   const loadUsers = useCallback(async (p = 1, signal?: AbortSignal) => {
     try {
@@ -48,7 +51,6 @@ export default function UsersPage() {
     }
   }, []);
 
-  // Inline async IIFE avoids react-hooks/set-state-in-effect
   useEffect(() => {
     const controller = new AbortController();
     void (async () => {
@@ -74,13 +76,21 @@ export default function UsersPage() {
     }
   }
 
-  async function deactivate(id: string) {
+  // CRITICAL FIX: deactivate previously called DELETE /users/{id} (which the
+  // backend maps to a soft-deactivate, not a real delete — see UserService.
+  // deactivate_user). Reactivation never existed because there was no PATCH
+  // call wired up. Both directions now go through PATCH /users/{id} with
+  // is_active, matching how AlertsPage.toggleRule already does it.
+  async function toggleActive(user: UserResponse) {
+    setPendingId(user.id);
     try {
-      await api.delete(`/users/${id}`);
-      toast.success("User deactivated");
+      await api.patch(`/users/${user.id}`, { is_active: !user.is_active });
+      toast.success(user.is_active ? "User deactivated" : "User reactivated");
       void loadUsers(page);
     } catch {
-      toast.error("Failed to deactivate");
+      toast.error(user.is_active ? "Failed to deactivate" : "Failed to reactivate");
+    } finally {
+      setPendingId(null);
     }
   }
 
@@ -127,16 +137,15 @@ export default function UsersPage() {
                 </Td>
                 <Td><span className="text-xs" style={{ color: "var(--text-tertiary)" }}>{formatDate(u.created_at)}</span></Td>
                 <Td>
-                  {u.is_active && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      icon={<UserX size={13} />}
-                      onClick={() => deactivate(u.id)}
-                    >
-                      Deactivate
-                    </Button>
-                  )}
+                  <Button
+                    variant={u.is_active ? "danger" : "success-soft"}
+                    size="sm"
+                    icon={u.is_active ? <UserX size={13} /> : <UserCheck size={13} />}
+                    loading={pendingId === u.id}
+                    onClick={() => toggleActive(u)}
+                  >
+                    {u.is_active ? "Deactivate" : "Activate"}
+                  </Button>
                 </Td>
               </Tr>
             ))}

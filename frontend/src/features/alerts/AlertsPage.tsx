@@ -64,7 +64,6 @@ export default function AlertsPage() {
     }
   }, []);
 
-  // Inline async IIFE avoids react-hooks/set-state-in-effect — same pattern as JobsPage
   useEffect(() => {
     const controller = new AbortController();
     void (async () => {
@@ -166,11 +165,11 @@ export default function AlertsPage() {
                   </Td>
                   <Td>
                     <div className="flex items-center gap-2">
-                      <Button variant="ghost" size="sm" onClick={() => toggleRule(rule)}>
+                      <Button variant="secondary" size="sm" onClick={() => toggleRule(rule)}>
                         {rule.is_active ? "Disable" : "Enable"}
                       </Button>
                       <Button
-                        variant="ghost"
+                        variant="danger"
                         size="sm"
                         icon={<Trash2 size={13} />}
                         onClick={() => deleteRule(rule.id)}
@@ -220,7 +219,7 @@ export default function AlertsPage() {
                     </Td>
                     <Td>
                       {!e.acknowledged && (
-                        <Button variant="ghost" size="sm" icon={<CheckCheck size={13} />} onClick={() => ackEvent(e.id)}>
+                        <Button variant="success-soft" size="sm" icon={<CheckCheck size={13} />} onClick={() => ackEvent(e.id)}>
                           Ack
                         </Button>
                       )}

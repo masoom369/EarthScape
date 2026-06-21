@@ -11,11 +11,21 @@ const LABELS: Record<string, string> = {
   humidity_pct: "Humid",
 };
 
-function getColor(val: number | null): string {
-  if (val == null) return "var(--bg-elevated)";
+// Theme-aware cell color: blends toward brand green (positive) or danger red
+// (negative) using the same CSS custom properties as the rest of the app,
+// instead of hardcoded rgba() that ignored light/dark contrast.
+function getCellStyle(val: number | null): React.CSSProperties {
+  if (val == null) {
+    return { background: "var(--bg-elevated)", color: "var(--text-tertiary)" };
+  }
   const abs = Math.abs(val);
-  if (val > 0) return `rgba(34, 197, 94, ${0.2 + abs * 0.8})`;
-  return `rgba(239, 68, 68, ${0.2 + abs * 0.8})`;
+  const intensity = Math.round(20 + abs * 70); // 20%-90% mix
+  const tint = val >= 0 ? "var(--success)" : "var(--danger)";
+  return {
+    background: `color-mix(in srgb, ${tint} ${intensity}%, var(--bg-elevated))`,
+    color: abs > 0.45 ? "white" : "var(--text-primary)",
+    fontWeight: abs > 0.45 ? 600 : 500,
+  };
 }
 
 interface Props {
@@ -38,14 +48,14 @@ export default function CorrelationHeatmap({ mlResult, loading }: Props) {
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-xs border-collapse">
+      <table className="w-full border-collapse" style={{ borderSpacing: "6px" }}>
         <thead>
           <tr>
-            <th className="p-2" />
+            <th className="p-2 w-16" />
             {METRICS.map((m) => (
               <th
                 key={m}
-                className="p-2 text-center font-medium"
+                className="pb-3 text-center text-xs font-semibold"
                 style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}
               >
                 {LABELS[m]}
@@ -57,7 +67,7 @@ export default function CorrelationHeatmap({ mlResult, loading }: Props) {
           {METRICS.map((row) => (
             <tr key={row}>
               <td
-                className="p-2 font-medium pr-3 text-right"
+                className="pr-3 text-right text-xs font-semibold whitespace-nowrap"
                 style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}
               >
                 {LABELS[row]}
@@ -65,16 +75,19 @@ export default function CorrelationHeatmap({ mlResult, loading }: Props) {
               {METRICS.map((col) => {
                 const val = matrix[row]?.[col] ?? null;
                 return (
-                  <td
-                    key={col}
-                    className="p-2 text-center rounded font-medium"
-                    style={{
-                      background: getColor(val),
-                      color: val != null && Math.abs(val) > 0.5 ? "white" : "var(--text-primary)",
-                      minWidth: "3.5rem",
-                    }}
-                  >
-                    {val != null ? val.toFixed(2) : "—"}
+                  <td key={col} className="p-1">
+                    <div
+                      className="flex items-center justify-center rounded-lg text-sm transition-transform duration-150 hover:scale-[1.04]"
+                      style={{
+                        ...getCellStyle(val),
+                        minWidth: "3.75rem",
+                        height: "2.75rem",
+                        fontFamily: "var(--font-mono)",
+                      }}
+                      title={`${LABELS[row]} × ${LABELS[col]}: ${val != null ? val.toFixed(4) : "insufficient data"}`}
+                    >
+                      {val != null ? val.toFixed(2) : "—"}
+                    </div>
                   </td>
                 );
               })}
@@ -82,6 +95,20 @@ export default function CorrelationHeatmap({ mlResult, loading }: Props) {
           ))}
         </tbody>
       </table>
+      <div className="flex items-center gap-4 mt-4 text-xs" style={{ color: "var(--text-tertiary)" }}>
+        <span className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded" style={{ background: "var(--danger)" }} />
+          Negative
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded" style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-default)" }} />
+          Weak
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded" style={{ background: "var(--success)" }} />
+          Positive
+        </span>
+      </div>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -26,6 +26,21 @@ const mrSchema = z.object({
   job_type: z.enum(["temperature_agg", "precipitation_totals", "anomaly_scores"]),
 });
 type MRForm = z.infer<typeof mrSchema>;
+
+// CRITICAL #3 fix: job_type → required input format. Drives the file dropdown
+// filter below so users physically cannot select a mismatched file.
+const JOB_TYPE_FORMAT: Record<MRForm["job_type"], "csv" | "json"> = {
+  temperature_agg: "csv",
+  precipitation_totals: "csv",
+  anomaly_scores: "json",
+};
+
+function fileFormat(filename: string): "csv" | "json" | null {
+  const ext = filename.split(".").pop()?.toLowerCase();
+  if (ext === "csv") return "csv";
+  if (ext === "json" || ext === "geojson") return "json";
+  return null;
+}
 
 const STATUS_VARIANT: Record<string, "success" | "danger" | "warning" | "info"> = {
   completed: "success",
@@ -57,8 +72,6 @@ export default function JobsPage() {
     } catch { /* silent poll error */ }
   }, []);
 
-  // Inline async IIFE avoids the react-hooks/set-state-in-effect false positive
-  // that fires when a useCallback setter is called directly in an effect body.
   useEffect(() => {
     void (async () => {
       try {
@@ -70,16 +83,25 @@ export default function JobsPage() {
 
   usePoll(() => loadJobs(page), POLL_MS);
 
-  const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<MRForm>({
+  const { register, handleSubmit, reset, watch, formState: { errors, isSubmitting } } = useForm<MRForm>({
     resolver: zodResolver(mrSchema),
     defaultValues: { job_type: "temperature_agg" },
   });
+
+  const selectedJobType = watch("job_type");
+  const requiredFormat = JOB_TYPE_FORMAT[selectedJobType];
+
+  // CRITICAL #3 fix: only list files matching the selected job type's format.
+  const compatibleFiles = useMemo(
+    () => ingestedFiles.filter((f) => fileFormat(f.filename) === requiredFormat),
+    [ingestedFiles, requiredFormat]
+  );
 
   async function onMR(data: MRForm) {
     try {
       await api.post("/jobs/mapreduce", data);
       toast.success("MapReduce job queued");
-      reset();
+      reset({ job_type: data.job_type });
       loadJobs(1);
     } catch {
       toast.error("Failed to submit job");
@@ -115,28 +137,31 @@ export default function JobsPage() {
               error={errors.job_name?.message}
               {...register("job_name")}
             />
+            <Select label="Job Type" {...register("job_type")}>
+              <option value="temperature_agg">Temperature Aggregation (CSV)</option>
+              <option value="precipitation_totals">Precipitation Totals (CSV)</option>
+              <option value="anomaly_scores">Anomaly Scores (JSON)</option>
+            </Select>
             <div className="space-y-1">
               <Select
-                label="Input File (HDFS)"
+                label={`Input File (HDFS) — ${requiredFormat.toUpperCase()} only`}
                 error={errors.hdfs_input_path?.message}
                 {...register("hdfs_input_path")}
               >
                 <option value="">— Select an ingested file —</option>
-                {ingestedFiles.length === 0 && (
-                  <option disabled>No ingested files found</option>
+                {compatibleFiles.length === 0 && (
+                  <option disabled>No {requiredFormat.toUpperCase()} files ingested yet</option>
                 )}
-                {ingestedFiles.map((log) => (
+                {compatibleFiles.map((log) => (
                   <option key={log.id} value={log.hdfs_path!}>
                     {log.filename} · {log.record_count} records · {formatDateTime(log.created_at)}
                   </option>
                 ))}
               </Select>
+              <p className="text-xs" style={{ color: "var(--text-tertiary)" }}>
+                Only files matching the selected job type&apos;s format are listed.
+              </p>
             </div>
-            <Select label="Job Type" {...register("job_type")}>
-              <option value="temperature_agg">Temperature Aggregation</option>
-              <option value="precipitation_totals">Precipitation Totals</option>
-              <option value="anomaly_scores">Anomaly Scores</option>
-            </Select>
             <Button type="submit" loading={isSubmitting} className="w-full mt-1">
               Submit MapReduce Job
             </Button>
@@ -199,6 +224,11 @@ export default function JobsPage() {
                       {job.status}
                     </span>
                   </Badge>
+                  {job.status === "failed" && job.error && (
+                    <p className="text-xs mt-1 max-w-xs" style={{ color: "var(--danger)" }}>
+                      {job.error}
+                    </p>
+                  )}
                 </Td>
                 <Td>
                   <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.75rem", color: "var(--text-tertiary)" }}>
