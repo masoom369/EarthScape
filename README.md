@@ -46,13 +46,8 @@ uvicorn app.main:app --reload --port 8000
 ```
 
 Default admin: `admin@earthscape.com` / `Admin123!`
-
-The backend auto-seeds 365 days of synthetic climate data (5 regions × 3
-source types × 3 readings/day ≈ 16,400 records) on first boot if
-`climate_records` is empty, then auto-trains all three ML models so
-dashboard charts are populated immediately. No manual seed step is
-required for a fresh database — `scripts/seed.py` below is only for
-loading additional real datasets on top of the synthetic baseline.
+Default analyst: `analyst@earthscape.com` / `Analyst123!`
+Default viewer: `viewer@earthscape.com` / `Viewer123!`
 
 ### 4. Frontend
 
@@ -66,11 +61,6 @@ npm run dev
 Open http://localhost:5173
 
 ## MapReduce Job Types & Required Input Format
-
-Each job type's mapper expects a specific input format. The Jobs page only
-lists ingested files matching the selected job type — submitting via the
-API directly with a mismatched format now fails fast with an explicit
-error (`MapReduceFormatError`) instead of a subprocess crash.
 
 | Job Type | Required Format | Output |
 |---|---|---|
@@ -141,5 +131,8 @@ Get `<your-access_token-cookie-value>` from your browser's dev tools
 Drop the MongoDB database entirely
 mongosh earthscape --eval "db.dropDatabase()"
 
-Remove seed files from HDFS (ignore errors if containers not yet up)
-docker exec earthscape-namenode hdfs dfs -rm -r -f /earthscape
+ Clean HDFS Internal Files (Run First)
+docker exec earthscape-namenode hdfs dfs -rm -r -skipTrash /earthscape
+
+Deep Clean (Recommended)
+docker compose down -v
