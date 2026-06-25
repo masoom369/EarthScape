@@ -52,8 +52,7 @@ class JobService:
                 hdfs_output=output_path,
             )
         except MapReduceFormatError as exc:
-            # CRITICAL #3 fix: format mismatch is a known, actionable user error —
-            # surfaced verbatim instead of a generic "Mapper failed" stack trace.
+            # Format mismatch: known, actionable user error — surface verbatim.
             await self.job_repo.update_status(job_id, "failed", error=str(exc))
         except Exception as exc:
             await self.job_repo.update_status(job_id, "failed", error=str(exc))
