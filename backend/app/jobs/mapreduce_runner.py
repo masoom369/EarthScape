@@ -22,6 +22,12 @@ JOB_TYPE_EXPECTED_FORMAT: dict[str, str] = {
     "anomaly_scores": "json",
 }
 
+# Seed runs process 82k+ records through a subprocess — 120s is too tight
+# on slower machines. 600s gives headroom for both CSV job types without
+# risking indefinite hangs (real hangs manifest as mapper producing no
+# output, not as a slow but progressing run).
+_SUBPROCESS_TIMEOUT = 600
+
 
 class MapReduceFormatError(RuntimeError):
     """Raised when hdfs_input_path extension doesn't match job_type's expected format."""
@@ -36,11 +42,11 @@ class MapReduceRunner:
         suffix = Path(hdfs_path).suffix.lower()
         if suffix == ".csv":
             return "csv"
-        if suffix in (".json", ".geojson"):
+        if suffix in (".json", ".geojson", ".ndjson"):
             return "json"
         raise MapReduceFormatError(
             f"Cannot determine format from input path '{hdfs_path}'. "
-            "Expected a .csv, .json, or .geojson extension."
+            "Expected a .csv, .json, .geojson, or .ndjson extension."
         )
 
     def _validate_format(self, job_type: str, hdfs_path: str) -> None:
@@ -64,8 +70,7 @@ class MapReduceRunner:
         CRITICAL #2 documented: input_data is the full file content as a string.
         For multi-GB datasets this will OOM. True fix requires real YARN submission
         with Hadoop Streaming JAR. This runner is a functional demo substitute.
-        MAJOR #12: sys.executable instead of "python" — avoids Python 2 on systems
-        where 'python' is not symlinked to Python 3.
+        sys.executable avoids Python 2 on systems where 'python' resolves to py2.
         """
         script_dir = MAPREDUCE_DIR / job_type
         mapper = str(script_dir / "mapper.py")
@@ -76,7 +81,7 @@ class MapReduceRunner:
             input=input_data,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=_SUBPROCESS_TIMEOUT,
         )
         if map_proc.returncode != 0:
             raise RuntimeError(f"Mapper failed: {map_proc.stderr[:500]}")
@@ -89,7 +94,7 @@ class MapReduceRunner:
             input=sorted_input,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=_SUBPROCESS_TIMEOUT,
         )
         if red_proc.returncode != 0:
             raise RuntimeError(f"Reducer failed: {red_proc.stderr[:500]}")
@@ -100,13 +105,26 @@ class MapReduceRunner:
         self, job_id: str, job_type: str, job_name: str, hdfs_input_path: str
     ) -> tuple[str, str]:
         """
-        Validate input format against job_type, read from HDFS (streamed),
-        run local mapper|sort|reducer pipeline, write output back to HDFS.
+        Validate input format, confirm file exists on HDFS, read it, run
+        local mapper|sort|reducer pipeline, write output back to HDFS.
         Returns (pseudo_app_id, hdfs_output_path).
-        Raises MapReduceFormatError before touching HDFS if format mismatches —
-        fails fast with an actionable message instead of a subprocess crash.
+
+        Raises MapReduceFormatError on format mismatch — fails before
+        touching HDFS so the error is actionable, not a subprocess crash.
+        Raises RuntimeError if the file doesn't exist on HDFS — prevents
+        the misleading 404 from surfacing deep inside read_file_stream.
         """
         self._validate_format(job_type, hdfs_input_path)
+
+        # Explicit existence check before streaming — read_file_stream raises
+        # a generic RuntimeError on 404 which is hard to distinguish from a
+        # network error. Checking first gives a clear message and skips the
+        # DataNode redirect round-trip entirely when the file is absent.
+        if not await self.hdfs.file_exists(hdfs_input_path):
+            raise RuntimeError(
+                f"HDFS input file not found: '{hdfs_input_path}'. "
+                "Ensure the file was successfully ingested before running this job."
+            )
 
         output_path = f"/earthscape/processed/mapreduce/{job_type}/{job_id}"
 
@@ -119,9 +137,6 @@ class MapReduceRunner:
 
         input_data = await self.hdfs.read_file(hdfs_input_path)
 
-        # anomaly_scores mapper requires one JSON object per line (JSONL), not a
-        # JSON array. If the ingested file is a JSON array, normalize it here
-        # rather than letting the mapper's per-line json.loads() blow up on line 1.
         if JOB_TYPE_EXPECTED_FORMAT[job_type] == "json":
             input_data = self._normalize_to_jsonl(input_data)
 
@@ -143,8 +158,8 @@ class MapReduceRunner:
         return f"local-{job_id}", output_path
 
     def _normalize_to_jsonl(self, content: str) -> str:
-        """Convert a JSON array file to newline-delimited JSON for the mapper's
-        per-line parser. No-op if content is already JSONL or a single object."""
+        """Convert a JSON array file to newline-delimited JSON for the mapper.
+        No-op if content is already JSONL or a single object."""
         stripped = content.strip()
         if not stripped:
             return content

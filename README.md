@@ -135,3 +135,11 @@ python scripts/producer.py --interval 10 --token <your-access_token-cookie-value
 
 Get `<your-access_token-cookie-value>` from your browser's dev tools
 (Application → Cookies → `access_token`) after logging in.
+
+
+## clean up of data
+Drop the MongoDB database entirely
+mongosh earthscape --eval "db.dropDatabase()"
+
+Remove seed files from HDFS (ignore errors if containers not yet up)
+docker exec earthscape-namenode hdfs dfs -rm -r -f /earthscape

@@ -11,13 +11,6 @@ class WebHDFSClient:
         self.settings = get_settings()
 
     def _rewrite_datanode_url(self, url: str) -> str:
-        """
-        Rewrite DataNode redirect URL host to HDFS_DATANODE_REWRITE_HOST.
-        Required in Docker-on-Windows setups where the DataNode self-reports
-        an internal container hostname unreachable from the host process.
-        No-op when HDFS_DATANODE_REWRITE_HOST is empty (remote cluster setups).
-        MAJOR #6: host now configurable via env instead of hardcoded 'localhost'.
-        """
         rewrite_host = self.settings.hdfs_datanode_rewrite_host
         if not rewrite_host:
             return url
@@ -56,7 +49,6 @@ class WebHDFSClient:
         return resp.status_code in (200, 201)
 
     async def upload_file(self, hdfs_path: str, data: bytes, overwrite: bool = True) -> bool:
-        """Two-step WebHDFS CREATE: get redirect URL, rewrite host, PUT data to DataNode."""
         params = {"op": "CREATE", "overwrite": str(overwrite).lower()}
         create_resp = await self._request("PUT", hdfs_path, params)
         if create_resp.status_code not in (307, 201):
@@ -69,16 +61,14 @@ class WebHDFSClient:
             put_resp = await client.put(local_url, content=data)
             return put_resp.status_code == 201
 
+    async def file_exists(self, hdfs_path: str) -> bool:
+        """Check existence without attempting to open/stream the file.
+        Uses GETFILESTATUS which returns 200 if exists, 404 if not —
+        avoids the 404 RuntimeError that read_file_stream raises on missing files."""
+        status = await self.get_file_status(hdfs_path)
+        return status is not None
+
     async def read_file_stream(self, hdfs_path: str, chunk_size: int = 65536) -> str:
-        """
-        Stream HDFS file in chunks to avoid loading multi-GB datasets into memory.
-        CRITICAL #2: replaces the old read_file() which returned the full file as a string.
-        For MapReduce local runner purposes, we still return the full content as a string
-        since subprocess.run requires it — but we stream the HTTP response to cap
-        per-chunk memory rather than buffering the entire response body at once.
-        Documented limitation: datasets >~512MB may still exhaust memory in the
-        local MapReduce runner. True Hadoop streaming would avoid this entirely.
-        """
         resp = await self._request("GET", hdfs_path, {"op": "OPEN"})
         if resp.status_code != 307:
             raise RuntimeError(
@@ -94,7 +84,6 @@ class WebHDFSClient:
                     chunks.append(chunk)
         return "".join(chunks)
 
-    # Keep old name as alias — callers in job_service/mapreduce_runner use this signature
     async def read_file(self, hdfs_path: str) -> str:
         return await self.read_file_stream(hdfs_path)
 
@@ -102,8 +91,6 @@ class WebHDFSClient:
         resp = await self._request("GET", hdfs_path, {"op": "GETFILESTATUS"})
         if resp.status_code != 200:
             return None
-        # dict[str, Any] is accurate here: WebHDFS FileStatus has heterogeneous value
-        # types (str, int, bool) that cannot be statically narrowed without a TypedDict.
         return resp.json().get("FileStatus")  # type: ignore[return-value]
 
     async def health_check(self) -> bool:
