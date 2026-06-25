@@ -5,12 +5,11 @@ Idempotent: safe to call on every boot — exits immediately if data exists.
 
 Full pipeline on first boot:
   1. Seed users, climate_records (5 years), alert rules/events, tickets, job logs.
-  2. Write the seeded climate data to HDFS as a real CSV (previously the
-     ingestion_logs row pointed at a path that was never actually written —
-     fixed here so MapReduce has real input to run against).
+  2. Write the seeded climate data to HDFS as a real CSV *and* a real NDJSON
+     file so all MapReduce jobs have their required input format.
   3. Auto-train all 3 ML models (anomaly_detection, trend_prediction, correlation).
   4. Auto-run all 3 MapReduce jobs (temperature_agg, precipitation_totals,
-     anomaly_scores) against the HDFS file from step 2.
+     anomaly_scores) against the appropriate HDFS file from step 2.
 
 Timeline: 2021-01-01 through 2025-12-31 inclusive — fixed 5 calendar year
 range (1826 days incl. 2024 leap year), not a rolling "now - N days" window.
@@ -57,11 +56,10 @@ SEED_END = date(2025, 12, 31)  # inclusive
 
 CO2_ANNUAL_DRIFT_PPM = 2.4
 
-# HDFS destination for the seeded dataset — this is what MapReduce jobs
-# actually read on boot. Previously seed.py referenced this exact path in
-# ingestion_logs without ever writing a file there; jobs pointed at it would
-# have failed with a 404 from WebHDFS. Fixed by _write_seed_csv_to_hdfs below.
-SEED_HDFS_PATH = "/earthscape/seed/climate_seed.csv"
+# HDFS destination for the seeded dataset — two files so every MapReduce job
+# type gets the format it actually requires.
+SEED_HDFS_PATH_CSV  = "/earthscape/seed/climate_seed.csv"
+SEED_HDFS_PATH_JSON = "/earthscape/seed/climate_seed.json"   # NEW: for anomaly_scores
 
 _rng = random.Random(42)
 
@@ -142,13 +140,6 @@ async def _seed_users(db: Any, admin_email: str, admin_password: str) -> dict[st
 async def _seed_climate_records(
     db: Any, admin_id: ObjectId
 ) -> tuple[ObjectId, list[ObjectId], list[dict]]:
-    """
-    Seed fixed range 2021-01-01..2025-12-31 inclusive (1826 days) x 5 regions
-    x 3 sources x 3 readings/day = 82,170 records.
-
-    Returns (ingestion_id, anomaly_record_ids, records) — records returned
-    so the caller can write the same data to HDFS without re-querying Mongo.
-    """
     now = datetime.now(UTC)
 
     existing_log = await db.ingestion_logs.find_one(
@@ -160,7 +151,7 @@ async def _seed_climate_records(
         ingestion_doc = {
             "filename": "climate_seed.csv",
             "file_hash": "seed_data_v4_2021_2025_5yr",
-            "hdfs_path": SEED_HDFS_PATH,
+            "hdfs_path": SEED_HDFS_PATH_CSV,   # keep the CSV path for the log
             "format": "csv",
             "record_count": 0,
             "status": "success",
@@ -183,9 +174,6 @@ async def _seed_climate_records(
                     ts = day_dt.replace(hour=hour)
                     records.append(_make_climate_record(region, ts, source, ingestion_id, now))
 
-    # 0.4% anomaly rate spread across the full 5-year range so anomaly
-    # detection / anomaly_scores MapReduce has signal everywhere, not just
-    # clustered in the most recent slice.
     anomaly_count = max(1, int(len(records) * 0.004))
     anomaly_indices = _rng.sample(range(len(records)), anomaly_count)
     anomaly_record_ids: list[ObjectId] = []
@@ -224,13 +212,6 @@ async def _seed_climate_records(
 
 
 def _records_to_csv(records: list[dict]) -> bytes:
-    """
-    Serialize seeded records to CSV matching the exact column layout the
-    MapReduce mappers expect positionally: region@0, timestamp@1, temp@2,
-    precip@3 (see mapreduce/temperature_agg/mapper.py and
-    mapreduce/precipitation_totals/mapper.py — both use parts[0]/parts[2]/
-    parts[3], not header-name lookup).
-    """
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow([
@@ -249,25 +230,53 @@ def _records_to_csv(records: list[dict]) -> bytes:
     return buf.getvalue().encode("utf-8")
 
 
+# NEW: produce NDJSON for anomaly_scores mapper (one JSON object per line)
+def _records_to_ndjson(records: list[dict]) -> bytes:
+    lines = []
+    for r in records:
+        rec = {
+            "region": r["location"]["region"],
+            "source_type": r["source_type"],
+            "timestamp": r["timestamp"].isoformat(),
+            "temperature_c": r["temperature_c"],
+            "precipitation_mm": r["precipitation_mm"],
+            "humidity_pct": r["humidity_pct"],
+            "co2_ppm": r["co2_ppm"],
+            "is_anomaly": r["is_anomaly"],
+            "location": r["location"],
+        }
+        lines.append(json.dumps(rec))
+    return "\n".join(lines).encode("utf-8")
+
+
 async def _write_seed_csv_to_hdfs(records: list[dict]) -> bool:
-    """
-    Write the seeded dataset to HDFS as a real file so MapReduce jobs have
-    actual input to read. Returns False (logged, non-fatal) if HDFS is
-    unreachable — boot must not hard-fail just because Hadoop containers
-    aren't up yet; the auto-MapReduce step below will then also fail
-    gracefully with the same root cause logged once, not twice.
-    """
     hdfs = WebHDFSClient()
     try:
         await hdfs.mkdir("/earthscape/seed")
-        ok = await hdfs.upload_file(SEED_HDFS_PATH, _records_to_csv(records), overwrite=True)
+        ok = await hdfs.upload_file(SEED_HDFS_PATH_CSV, _records_to_csv(records), overwrite=True)
         if ok:
-            logger.info("seed_hdfs_csv_written", path=SEED_HDFS_PATH, records=len(records))
+            logger.info("seed_hdfs_csv_written", path=SEED_HDFS_PATH_CSV, records=len(records))
         else:
-            logger.warning("seed_hdfs_csv_write_failed", path=SEED_HDFS_PATH)
+            logger.warning("seed_hdfs_csv_write_failed", path=SEED_HDFS_PATH_CSV)
         return ok
     except Exception as exc:
         logger.warning("seed_hdfs_unreachable", error=str(exc))
+        return False
+
+
+# NEW: also write JSON variant
+async def _write_seed_json_to_hdfs(records: list[dict]) -> bool:
+    hdfs = WebHDFSClient()
+    try:
+        await hdfs.mkdir("/earthscape/seed")
+        ok = await hdfs.upload_file(SEED_HDFS_PATH_JSON, _records_to_ndjson(records), overwrite=True)
+        if ok:
+            logger.info("seed_hdfs_json_written", path=SEED_HDFS_PATH_JSON, records=len(records))
+        else:
+            logger.warning("seed_hdfs_json_write_failed", path=SEED_HDFS_PATH_JSON)
+        return ok
+    except Exception as exc:
+        logger.warning("seed_hdfs_unreachable_json", error=str(exc))
         return False
 
 
@@ -393,12 +402,8 @@ async def _auto_train_ml_models(admin_id: ObjectId) -> None:
 
 async def _auto_run_mapreduce_jobs(admin_id: ObjectId, hdfs_available: bool) -> None:
     """
-    Run all 3 MapReduce job types against the seed CSV written to HDFS.
-    Skipped (logged, non-fatal) if the HDFS write failed — Hadoop containers
-    may not be up yet on a first `docker compose up` that races the backend
-    boot. Each job creates its own job_logs row via JobService, identical to
-    a user-triggered submission, so it's indistinguishable in the Jobs UI
-    from a manual run.
+    Run all 3 MapReduce job types against the appropriate seed files.
+    Uses CSV for temperature_agg & precipitation_totals, NDJSON for anomaly_scores.
     """
     if not hdfs_available:
         logger.warning("seed_mapreduce_skipped", reason="hdfs_seed_csv_not_written")
@@ -407,27 +412,25 @@ async def _auto_run_mapreduce_jobs(admin_id: ObjectId, hdfs_available: bool) -> 
     from app.services.job_service import JobService
 
     job_service = JobService()
-    job_types = [
-        ("temperature_agg", "Temperature Aggregation — Seed Run"),
-        ("precipitation_totals", "Precipitation Totals — Seed Run"),
-        ("anomaly_scores", "Anomaly Scores — Seed Run"),
+
+    # Map each job type to its required format and HDFS path
+    job_configs = [
+        ("temperature_agg",     "Temperature Aggregation — Seed Run",     SEED_HDFS_PATH_CSV),
+        ("precipitation_totals","Precipitation Totals — Seed Run",        SEED_HDFS_PATH_CSV),
+        ("anomaly_scores",      "Anomaly Scores — Seed Run",             SEED_HDFS_PATH_JSON),  # NEW: uses JSON
     ]
 
-    for job_type, job_name in job_types:
+    for job_type, job_name, hdfs_path in job_configs:
         try:
             job_id = await job_service.job_repo.create(
-                "mapreduce", job_name, str(admin_id), SEED_HDFS_PATH,
+                "mapreduce", job_name, str(admin_id), hdfs_path,
                 f"/earthscape/processed/mapreduce/{job_type}/pending",
             )
             await job_service.trigger_mapreduce(
-                job_name, job_type, SEED_HDFS_PATH, str(admin_id), str(job_id)
+                job_name, job_type, hdfs_path, str(admin_id), str(job_id)
             )
             logger.info("seed_mapreduce_completed", job_type=job_type)
         except Exception as exc:
-            # anomaly_scores requires JSON input per JOB_TYPE_EXPECTED_FORMAT
-            # in mapreduce_runner.py, but the seed file is CSV — this job is
-            # expected to fail format validation here, logged not raised.
-            # See note in run_seed() docstring below for the full explanation.
             logger.warning("seed_mapreduce_failed", job_type=job_type, error=str(exc))
 
 
@@ -436,19 +439,6 @@ async def run_seed(admin_email: str, admin_password: str) -> None:
     Entry point. Checks if database is empty before seeding.
     'Empty' = zero documents in climate_records.
     Safe to call on every startup: returns immediately if data present.
-
-    IMPORTANT — anomaly_scores will fail by design on the seed run:
-    MapReduceRunner enforces job_type -> input format (temperature_agg and
-    precipitation_totals require CSV; anomaly_scores requires JSON — see
-    JOB_TYPE_EXPECTED_FORMAT in app/jobs/mapreduce_runner.py, added as the
-    CRITICAL #3 fix in a prior pass). The seeded dataset is written to HDFS
-    as a single CSV (climate_seed.csv) because climate_records in Mongo
-    doesn't carry a "this came from a JSON source" distinction worth
-    serializing twice. Running anomaly_scores against it will correctly
-    fail format validation and log a warning, not crash boot. anomaly_scores
-    gets real input once you generate and upload sensor_bulk.json via
-    `scripts/producer.py` (now a bulk file generator, not a live poster —
-    see that file) and trigger the job manually from the Jobs page.
     """
     db = get_db()
 
@@ -468,10 +458,12 @@ async def run_seed(admin_email: str, admin_password: str) -> None:
         await _seed_alert_events(db, rule_ids, anomaly_record_ids, admin_id)
         await _seed_support_tickets(db, user_ids)
 
-        hdfs_available = await _write_seed_csv_to_hdfs(records)
+        # Write both CSV and NDJSON to HDFS
+        csv_ok = await _write_seed_csv_to_hdfs(records)
+        json_ok = await _write_seed_json_to_hdfs(records)  # NEW
+        hdfs_available = csv_ok and json_ok
 
-        # ML first (reads Mongo, always available), then MapReduce (reads
-        # HDFS, may be unavailable if Hadoop containers aren't up yet).
+        # ML first (reads Mongo), then MapReduce (reads HDFS)
         await _auto_train_ml_models(admin_id)
         await _auto_run_mapreduce_jobs(admin_id, hdfs_available)
 
