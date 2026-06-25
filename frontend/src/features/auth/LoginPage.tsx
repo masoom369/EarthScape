@@ -156,7 +156,7 @@ export default function LoginPage() {
           </form>
 
           <p className="text-center text-xs mt-5" style={{ color: "var(--text-tertiary)" }}>
-            Default: admin@earthscape.com / Admin123!
+            Default: viewer@earthscape.com / Viewer123!
           </p>
         </div>
 

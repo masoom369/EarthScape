@@ -64,7 +64,7 @@ const SECTIONS: HelpSection[] = [
         label: "Default credentials",
         text: (
           <>
-            First run only: <Kbd>admin@earthscape.com</Kbd> / <Kbd>Admin123!</Kbd>
+            First run only: <Kbd>viewer@earthscape.com</Kbd> / <Kbd>Viewer123!</Kbd>
           </>
         ),
       },
