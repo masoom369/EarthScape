@@ -102,11 +102,25 @@ class ClimateRepository:
         return result.modified_count
 
     async def find_for_ml(self, days: int, fields: list[str] | None = None) -> list[dict]:
-        """Fetch records from last N days for ML training."""
-        since = datetime.now(UTC) - timedelta(days=days)
+        """
+        Fetch records within the last N days, anchored to the latest timestamp
+        in the collection rather than wall-clock now().
+        """
+        latest_doc = await self.collection.find_one(
+            {"is_archived": False},
+            sort=[("timestamp", -1)],
+            projection={"timestamp": 1},
+        )
+        if latest_doc is None:
+            return []
+
+        latest_ts: datetime = latest_doc["timestamp"]
+        since = latest_ts - timedelta(days=days)
+
         cursor = self.collection.find(
             {"timestamp": {"$gte": since}, "is_archived": False}
         ).sort("timestamp", 1)
+
         docs = []
         async for doc in cursor:
             if fields:
